@@ -153,31 +153,34 @@ func TestModifyDN(t *testing.T) {
 }
 */
 
-type modifyTestHandler struct {
-}
+type modifyTestHandler struct{}
 
 func (h modifyTestHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
 	if bindDN == "" && bindSimplePw == "" {
 		return ldap.LDAPResultSuccess, nil
 	}
+
 	return ldap.LDAPResultInvalidCredentials, nil
 }
+
 func (h modifyTestHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) (uint16, error) {
 	// only succeed on expected contents of add.ldif:
-	if len(req.Attributes) == 5 && req.DN == "cn=Barbara Jensen,dc=example,dc=com" &&
-		req.Attributes[2].Type == "sn" && len(req.Attributes[2].Vals) == 1 &&
-		req.Attributes[2].Vals[0] == "Jensen" {
+	if len(req.Attributes) == 5 && req.DN == "cn=Barbara Jensen,dc=example,dc=com" && req.Attributes[2].Type == "sn" && len(req.Attributes[2].Vals) == 1 && req.Attributes[2].Vals[0] == "Jensen" {
 		return ldap.LDAPResultSuccess, nil
 	}
+
 	return ldap.LDAPResultInsufficientAccessRights, nil
 }
+
 func (h modifyTestHandler) Delete(boundDN, deleteDN string, conn net.Conn) (uint16, error) {
 	// only succeed on expected deleteDN
 	if deleteDN == "cn=Delete Me,dc=example,dc=com" {
 		return ldap.LDAPResultSuccess, nil
 	}
+
 	return ldap.LDAPResultInsufficientAccessRights, nil
 }
+
 func (h modifyTestHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.Conn) (uint16, error) {
 	// only succeed on expected contents of modify.ldif:
 	var (
@@ -187,12 +190,16 @@ func (h modifyTestHandler) Modify(boundDN string, req ldap.ModifyRequest, conn n
 	)
 	for _, change := range req.Changes {
 		switch change.Operation {
+
 		case ldap.AddAttribute:
 			AddAttributes = append(AddAttributes, change.Modification)
+
 		case ldap.DeleteAttribute:
 			DeleteAttributes = append(DeleteAttributes, change.Modification)
+
 		case ldap.ReplaceAttribute:
 			ReplaceAttributes = append(ReplaceAttributes, change.Modification)
+
 		default:
 			return ldap.LDAPResultOperationsError, fmt.Errorf("Unknown Operation: %v", change.Operation)
 		}
@@ -200,10 +207,13 @@ func (h modifyTestHandler) Modify(boundDN string, req ldap.ModifyRequest, conn n
 	if req.DN == "cn=testy,dc=example,dc=com" && len(AddAttributes) == 1 &&
 		len(DeleteAttributes) == 3 && len(ReplaceAttributes) == 2 &&
 		DeleteAttributes[2].Type == "details" && len(DeleteAttributes[2].Vals) == 0 {
+
 		return ldap.LDAPResultSuccess, nil
 	}
+
 	return ldap.LDAPResultInsufficientAccessRights, nil
 }
+
 func (h modifyTestHandler) ModifyDN(boundDN string, req ldap.ModifyDNRequest, conn net.Conn) (uint16, error) {
 	return ldap.LDAPResultInsufficientAccessRights, nil
 }

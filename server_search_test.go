@@ -20,8 +20,6 @@ func TestSearchSimpleOK(t *testing.T) {
 		}
 	}()
 
-	serverBaseDN := "o=testers,c=test"
-
 	go func() {
 		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x",
 			"-b", serverBaseDN, "-D", "cn=testy,"+serverBaseDN, "-w", "iLike2test")
@@ -144,7 +142,6 @@ func TestSearchSizelimit(t *testing.T) {
 	quit <- true
 }
 
-// ///////////////////////
 func TestBindSearchMulti(t *testing.T) {
 	quit := make(chan bool)
 	done := make(chan bool)
@@ -161,7 +158,7 @@ func TestBindSearchMulti(t *testing.T) {
 	}()
 
 	go func() {
-		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", "o=testers,c=test",
+		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", serverBaseDN,
 			"-D", "cn=testy,o=testers,c=test", "-w", "iLike2test", "cn=ned")
 		out, _ := cmd.CombinedOutput()
 		if !strings.Contains(string(out), "result: 0 Success") {
@@ -191,7 +188,6 @@ func TestBindSearchMulti(t *testing.T) {
 	quit <- true
 }
 
-// ///////////////////////
 func TestSearchPanic(t *testing.T) {
 	quit := make(chan bool)
 	done := make(chan bool)
@@ -206,7 +202,7 @@ func TestSearchPanic(t *testing.T) {
 	}()
 
 	go func() {
-		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", "o=testers,c=test")
+		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", serverBaseDN)
 		out, _ := cmd.CombinedOutput()
 		if !strings.Contains(string(out), "result: 1 Operations error") {
 			t.Errorf("ldapsearch should have returned operations error due to panic: %v", string(out))
@@ -222,7 +218,6 @@ func TestSearchPanic(t *testing.T) {
 	quit <- true
 }
 
-// ///////////////////////
 type compileSearchFilterTest struct {
 	name         string
 	filterStr    string
@@ -230,34 +225,33 @@ type compileSearchFilterTest struct {
 }
 
 var searchFilterTestFilters = []compileSearchFilterTest{
-	compileSearchFilterTest{name: "equalityOk", filterStr: "(uid=ned)", numResponses: "2"},
-	compileSearchFilterTest{name: "equalityNo", filterStr: "(uid=foo)", numResponses: "1"},
-	compileSearchFilterTest{name: "equalityOk", filterStr: "(objectclass=posixaccount)", numResponses: "4"},
-	compileSearchFilterTest{name: "presentEmptyOk", filterStr: "", numResponses: "4"},
-	compileSearchFilterTest{name: "presentOk", filterStr: "(objectclass=*)", numResponses: "4"},
-	compileSearchFilterTest{name: "presentOk", filterStr: "(description=*)", numResponses: "3"},
-	compileSearchFilterTest{name: "presentNo", filterStr: "(foo=*)", numResponses: "1"},
-	compileSearchFilterTest{name: "andOk", filterStr: "(&(uid=ned)(objectclass=posixaccount))", numResponses: "2"},
-	compileSearchFilterTest{name: "andNo", filterStr: "(&(uid=ned)(objectclass=posixgroup))", numResponses: "1"},
-	compileSearchFilterTest{name: "andNo", filterStr: "(&(uid=ned)(uid=trent))", numResponses: "1"},
-	compileSearchFilterTest{name: "orOk", filterStr: "(|(uid=ned)(uid=trent))", numResponses: "3"},
-	compileSearchFilterTest{name: "orOk", filterStr: "(|(uid=ned)(objectclass=posixaccount))", numResponses: "4"},
-	compileSearchFilterTest{name: "orNo", filterStr: "(|(uid=foo)(objectclass=foo))", numResponses: "1"},
-	compileSearchFilterTest{name: "andOrOk", filterStr: "(&(|(uid=ned)(uid=trent))(objectclass=posixaccount))", numResponses: "3"},
-	compileSearchFilterTest{name: "notOk", filterStr: "(!(uid=ned))", numResponses: "3"},
-	compileSearchFilterTest{name: "notOk", filterStr: "(!(uid=foo))", numResponses: "4"},
-	compileSearchFilterTest{name: "notAndOrOk", filterStr: "(&(|(uid=ned)(uid=trent))(!(objectclass=posixgroup)))", numResponses: "3"},
+	{name: "equalityOk", filterStr: "(uid=ned)", numResponses: "2"},
+	{name: "equalityNo", filterStr: "(uid=foo)", numResponses: "1"},
+	{name: "equalityOk", filterStr: "(objectclass=posixaccount)", numResponses: "4"},
+	{name: "presentEmptyOk", filterStr: "", numResponses: "4"},
+	{name: "presentOk", filterStr: "(objectclass=*)", numResponses: "4"},
+	{name: "presentOk", filterStr: "(description=*)", numResponses: "3"},
+	{name: "presentNo", filterStr: "(foo=*)", numResponses: "1"},
+	{name: "andOk", filterStr: "(&(uid=ned)(objectclass=posixaccount))", numResponses: "2"},
+	{name: "andNo", filterStr: "(&(uid=ned)(objectclass=posixgroup))", numResponses: "1"},
+	{name: "andNo", filterStr: "(&(uid=ned)(uid=trent))", numResponses: "1"},
+	{name: "orOk", filterStr: "(|(uid=ned)(uid=trent))", numResponses: "3"},
+	{name: "orOk", filterStr: "(|(uid=ned)(objectclass=posixaccount))", numResponses: "4"},
+	{name: "orNo", filterStr: "(|(uid=foo)(objectclass=foo))", numResponses: "1"},
+	{name: "andOrOk", filterStr: "(&(|(uid=ned)(uid=trent))(objectclass=posixaccount))", numResponses: "3"},
+	{name: "notOk", filterStr: "(!(uid=ned))", numResponses: "3"},
+	{name: "notOk", filterStr: "(!(uid=foo))", numResponses: "4"},
+	{name: "notAndOrOk", filterStr: "(&(|(uid=ned)(uid=trent))(!(objectclass=posixgroup)))", numResponses: "3"},
+	{name: "Suffix", filterStr: "(objectClass=posix*)", numResponses: "4"},
+	{name: "Prefix", filterStr: "(cn=*nt)", numResponses: "2"},
+	{name: "Any", filterStr: "(cn=*e*)", numResponses: "3"},
 	/*
-		compileSearchFilterTest{filterStr: "(sn=Mill*)", filterType: FilterSubstrings},
-		compileSearchFilterTest{filterStr: "(sn=*Mill)", filterType: FilterSubstrings},
-		compileSearchFilterTest{filterStr: "(sn=*Mill*)", filterType: FilterSubstrings},
 		compileSearchFilterTest{filterStr: "(sn>=Miller)", filterType: FilterGreaterOrEqual},
 		compileSearchFilterTest{filterStr: "(sn<=Miller)", filterType: FilterLessOrEqual},
 		compileSearchFilterTest{filterStr: "(sn~=Miller)", filterType: FilterApproxMatch},
 	*/
 }
 
-// ///////////////////////
 func TestSearchFiltering(t *testing.T) {
 	quit := make(chan bool)
 	done := make(chan bool)
@@ -294,7 +288,6 @@ func TestSearchFiltering(t *testing.T) {
 	quit <- true
 }
 
-// ///////////////////////
 func TestSearchAttributes(t *testing.T) {
 	quit := make(chan bool)
 	done := make(chan bool)
@@ -390,7 +383,6 @@ func TestSearchAllUserAttributes(t *testing.T) {
 	quit <- true
 }
 
-// ///////////////////////
 func TestSearchScope(t *testing.T) {
 	quit := make(chan bool)
 	done := make(chan bool)
@@ -414,7 +406,7 @@ func TestSearchScope(t *testing.T) {
 		}
 
 		cmd = exec.Command("ldapsearch", "-H", ldapURL, "-x",
-			"-b", "o=testers,c=test", "-D", "cn=testy,o=testers,c=test", "-w", "iLike2test", "-s", "one", "cn=trent")
+			"-b", serverBaseDN, "-D", "cn=testy,o=testers,c=test", "-w", "iLike2test", "-s", "one", "cn=trent")
 		out, _ = cmd.CombinedOutput()
 		if !strings.Contains(string(out), "dn: cn=trent,o=testers,c=test") {
 			t.Errorf("ldapsearch 'one' scope failed - didn't find expected DN: %v", string(out))
@@ -433,7 +425,7 @@ func TestSearchScope(t *testing.T) {
 			t.Errorf("ldapsearch 'base' scope failed - didn't find expected DN: %v", string(out))
 		}
 		cmd = exec.Command("ldapsearch", "-H", ldapURL, "-x",
-			"-b", "o=testers,c=test", "-D", "cn=testy,o=testers,c=test", "-w", "iLike2test", "-s", "base", "cn=trent")
+			"-b", serverBaseDN, "-D", "cn=testy,o=testers,c=test", "-w", "iLike2test", "-s", "base", "cn=trent")
 		out, _ = cmd.CombinedOutput()
 		if strings.Contains(string(out), "dn: cn=trent,o=testers,c=test") {
 			t.Errorf("ldapsearch 'base' scope failed - found unexpected DN: %v", string(out))
@@ -450,7 +442,6 @@ func TestSearchScope(t *testing.T) {
 	quit <- true
 }
 
-// ///////////////////////
 func TestSearchScopeCaseInsensitive(t *testing.T) {
 	quit := make(chan bool)
 	done := make(chan bool)
@@ -496,8 +487,6 @@ func TestSearchControls(t *testing.T) {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
 	}()
-
-	serverBaseDN := "o=testers,c=test"
 
 	go func() {
 		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x",

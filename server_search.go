@@ -17,7 +17,7 @@ func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID in
 		}
 	}()
 
-	searchReq, err := parseSearchRequest(boundDN, req, controls)
+	searchReq, err := parseSearchRequest(req, controls)
 	if err != nil {
 		return ldap.NewError(ldap.LDAPResultOperationsError, err)
 	}
@@ -80,10 +80,7 @@ func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID in
 			}
 
 			// filter attributes
-			entry, err = filterAttributes(entry, searchReq.Attributes)
-			if err != nil {
-				return ldap.NewError(ldap.LDAPResultOperationsError, err)
-			}
+			entry = filterAttributes(entry, searchReq.Attributes)
 
 			// size limit
 			if searchReq.SizeLimit > 0 && i >= searchReq.SizeLimit {
@@ -93,16 +90,16 @@ func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID in
 		}
 
 		// respond
-		responsePacket := encodeSearchResponse(messageID, searchReq, entry)
+		responsePacket := encodeSearchResponse(messageID, entry)
 		if err = sendPacket(conn, responsePacket); err != nil {
 			return ldap.NewError(ldap.LDAPResultOperationsError, err)
 		}
 	}
+
 	return nil
 }
 
-// ///////////////////////
-func parseSearchRequest(boundDN string, req *ber.Packet, controls *[]ldap.Control) (ldap.SearchRequest, error) {
+func parseSearchRequest(req *ber.Packet, controls *[]ldap.Control) (ldap.SearchRequest, error) {
 	if len(req.Children) != 8 {
 		return ldap.SearchRequest{}, ldap.NewError(ldap.LDAPResultOperationsError, errors.New("Bad search request: invalid length"))
 	}
@@ -156,8 +153,7 @@ func parseSearchRequest(boundDN string, req *ber.Packet, controls *[]ldap.Contro
 	return searchReq, nil
 }
 
-// ///////////////////////
-func filterAttributes(entry *ldap.Entry, attributes []string) (*ldap.Entry, error) {
+func filterAttributes(entry *ldap.Entry, attributes []string) *ldap.Entry {
 	// only return requested attributes
 	newAttributes := []*ldap.EntryAttribute{}
 
@@ -170,13 +166,14 @@ func filterAttributes(entry *ldap.Entry, attributes []string) (*ldap.Entry, erro
 				// "+supportedControl" is treated as an operational attribute
 				if strings.HasPrefix(attrNameLower, "+") {
 					if requestedLower == "+" || attrNameLower == "+"+requestedLower {
-
 						newAttributes = append(newAttributes, ldap.NewEntryAttribute(attr.Name[1:], attr.Values))
+
 						break
 					}
 				} else {
 					if requested == "*" || attrNameLower == requestedLower {
 						newAttributes = append(newAttributes, attr)
+
 						break
 					}
 				}
@@ -192,11 +189,10 @@ func filterAttributes(entry *ldap.Entry, attributes []string) (*ldap.Entry, erro
 	}
 	entry.Attributes = newAttributes
 
-	return entry, nil
+	return entry
 }
 
-// ///////////////////////
-func encodeSearchResponse(messageID int64, req ldap.SearchRequest, res *ldap.Entry) *ber.Packet {
+func encodeSearchResponse(messageID int64, res *ldap.Entry) *ber.Packet {
 	responsePacket := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Response")
 	responsePacket.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, messageID, "Message ID"))
 
@@ -231,10 +227,12 @@ func encodeSearchAttribute(name string, values []string) *ber.Packet {
 func encodeSearchDone(messageID int64, LDAPResultCode uint16) *ber.Packet {
 	responsePacket := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Response")
 	responsePacket.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, messageID, "Message ID"))
+
 	donePacket := ber.Encode(ber.ClassApplication, ber.TypeConstructed, ldap.ApplicationSearchResultDone, nil, "Search result done")
 	donePacket.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagEnumerated, uint64(LDAPResultCode), "resultCode: "))
 	donePacket.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "", "matchedDN: "))
 	donePacket.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "", "errorMessage: "))
+
 	responsePacket.AppendChild(donePacket)
 
 	return responsePacket

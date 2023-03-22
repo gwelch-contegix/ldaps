@@ -53,14 +53,16 @@ func TestApplyFilter(t *testing.T) {
 			Filter: "(memberOf=cn=*sers,ou=groups,dc=example,dc=org)",
 			Entry: ldap.NewEntry("cn=test,ou=users,dc=example,dc=org", map[string][]string{
 				"objectclass": {"User"},
-				"memberOf":    {"cn=users,ou=groups,dc=example,dc=org"}}),
+				"memberOf":    {"cn=users,ou=groups,dc=example,dc=org"},
+			}),
 			Expected: true,
 		},
 		{
 			Filter: "(memberOf=cn=*sers,ou=groups,dc=example,dc=org)",
 			Entry: ldap.NewEntry("cn=test,ou=users,dc=example,dc=org", map[string][]string{
 				"objectclass": {"User"},
-				"memberOf":    {"cn=admins,ou=groups,dc=example,dc=org"}}),
+				"memberOf":    {"cn=admins,ou=groups,dc=example,dc=org"},
+			}),
 			Expected: false,
 		},
 	} {

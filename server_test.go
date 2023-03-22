@@ -12,12 +12,13 @@ import (
 	"github.com/go-ldap/ldap/v3"
 )
 
-var listenString = "127.0.0.1:3389"
-var ldapURL = "ldap://" + listenString
-var timeout = 400 * time.Millisecond
-var serverBaseDN = "o=testers,c=test"
+const (
+	listenString = "127.0.0.1:3389"
+	ldapURL      = "ldap://" + listenString
+	timeout      = 400 * time.Millisecond
+	serverBaseDN = "o=testers,c=test"
+)
 
-// ///////////////////////
 func TestBindAnonOK(t *testing.T) {
 	quit := make(chan bool)
 	done := make(chan bool)
@@ -31,7 +32,7 @@ func TestBindAnonOK(t *testing.T) {
 	}()
 
 	go func() {
-		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", "o=testers,c=test")
+		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", serverBaseDN)
 		out, _ := cmd.CombinedOutput()
 		if !strings.Contains(string(out), "result: 0 Success") {
 			t.Errorf("ldapsearch failed: %v", string(out))
@@ -47,7 +48,6 @@ func TestBindAnonOK(t *testing.T) {
 	quit <- true
 }
 
-// ///////////////////////
 func TestBindAnonFail(t *testing.T) {
 	quit := make(chan bool)
 	done := make(chan bool)
@@ -61,7 +61,7 @@ func TestBindAnonFail(t *testing.T) {
 
 	time.Sleep(timeout)
 	go func() {
-		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", "o=testers,c=test")
+		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", serverBaseDN)
 		out, _ := cmd.CombinedOutput()
 		if !strings.Contains(string(out), "ldap_bind: Invalid credentials (49)") {
 			t.Errorf("ldapsearch failed: %v", string(out))
@@ -78,7 +78,6 @@ func TestBindAnonFail(t *testing.T) {
 	quit <- true
 }
 
-// ///////////////////////
 func TestBindSimpleOK(t *testing.T) {
 	quit := make(chan bool)
 	done := make(chan bool)
@@ -92,7 +91,7 @@ func TestBindSimpleOK(t *testing.T) {
 		}
 	}()
 
-	serverBaseDN := "o=testers,c=test"
+	serverBaseDN := serverBaseDN
 
 	go func() {
 		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x",
@@ -112,7 +111,6 @@ func TestBindSimpleOK(t *testing.T) {
 	quit <- true
 }
 
-// ///////////////////////
 func TestBindSimpleFailBadPw(t *testing.T) {
 	quit := make(chan bool)
 	done := make(chan bool)
@@ -125,7 +123,7 @@ func TestBindSimpleFailBadPw(t *testing.T) {
 		}
 	}()
 
-	serverBaseDN := "o=testers,c=test"
+	serverBaseDN := serverBaseDN
 
 	go func() {
 		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x",
@@ -145,7 +143,6 @@ func TestBindSimpleFailBadPw(t *testing.T) {
 	quit <- true
 }
 
-// ///////////////////////
 func TestBindSimpleFailBadDn(t *testing.T) {
 	quit := make(chan bool)
 	done := make(chan bool)
@@ -158,7 +155,7 @@ func TestBindSimpleFailBadDn(t *testing.T) {
 		}
 	}()
 
-	serverBaseDN := "o=testers,c=test"
+	serverBaseDN := serverBaseDN
 
 	go func() {
 		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x",
@@ -178,12 +175,12 @@ func TestBindSimpleFailBadDn(t *testing.T) {
 	quit <- true
 }
 
-// ///////////////////////
 func TestBindSSL(t *testing.T) {
 	ldapURLSSL := "ldaps://" + listenString
 	longerTimeout := time.Millisecond * 300
 	quit := make(chan bool)
 	done := make(chan bool)
+
 	go func() {
 		s := NewServer()
 		s.QuitChannel(quit)
@@ -194,8 +191,9 @@ func TestBindSSL(t *testing.T) {
 	}()
 
 	time.Sleep(longerTimeout * 2)
+
 	go func() {
-		cmd := exec.Command("ldapsearch", "-H", ldapURLSSL, "-x", "-b", "o=testers,c=test")
+		cmd := exec.Command("ldapsearch", "-H", ldapURLSSL, "-x", "-b", serverBaseDN)
 		cmd.Env = append(cmd.Environ(), "LDAPTLS_REQCERT=never")
 		out, _ := cmd.CombinedOutput()
 		if !strings.Contains(string(out), "result: 0 Success") {
@@ -212,7 +210,6 @@ func TestBindSSL(t *testing.T) {
 	quit <- true
 }
 
-// ///////////////////////
 func TestBindPanic(t *testing.T) {
 	quit := make(chan bool)
 	done := make(chan bool)
@@ -226,7 +223,7 @@ func TestBindPanic(t *testing.T) {
 	}()
 
 	go func() {
-		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", "o=testers,c=test")
+		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", serverBaseDN)
 		out, _ := cmd.CombinedOutput()
 		if !strings.Contains(string(out), "ldap_bind: Operations error") {
 			t.Errorf("ldapsearch should have returned operations error due to panic: %v", string(out))
@@ -242,13 +239,13 @@ func TestBindPanic(t *testing.T) {
 	quit <- true
 }
 
-// ///////////////////////
 type testStatsWriter struct {
 	buffer *bytes.Buffer
 }
 
 func (tsw testStatsWriter) Write(buf []byte) (int, error) {
 	tsw.buffer.Write(buf)
+
 	return len(buf), nil
 }
 
@@ -271,7 +268,7 @@ func TestSearchStats(t *testing.T) {
 	}()
 
 	go func() {
-		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", "o=testers,c=test")
+		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", serverBaseDN)
 		out, _ := cmd.CombinedOutput()
 		if !strings.Contains(string(out), "result: 0 Success") {
 			t.Errorf("ldapsearch failed: %v", string(out))
@@ -292,56 +289,53 @@ func TestSearchStats(t *testing.T) {
 	quit <- true
 }
 
-// ///////////////////////
-type bindAnonOK struct {
-}
+type bindAnonOK struct{}
 
 func (b bindAnonOK) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
 	if bindDN == "" && bindSimplePw == "" {
 		return ldap.LDAPResultSuccess, nil
 	}
+
 	return ldap.LDAPResultInvalidCredentials, nil
 }
 
-type bindSimple struct {
-}
+type bindSimple struct{}
 
 func (b bindSimple) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
 	if bindDN == "cn=testy,o=testers,c=test" && bindSimplePw == "iLike2test" {
 		return ldap.LDAPResultSuccess, nil
 	}
+
 	return ldap.LDAPResultInvalidCredentials, nil
 }
 
-type bindSimple2 struct {
-}
+type bindSimple2 struct{}
 
 func (b bindSimple2) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
 	if bindDN == "cn=testy,o=testers,c=testz" && bindSimplePw == "ZLike2test" {
 		return ldap.LDAPResultSuccess, nil
 	}
+
 	return ldap.LDAPResultInvalidCredentials, nil
 }
 
-type bindPanic struct {
-}
+type bindPanic struct{}
 
 func (b bindPanic) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
 	panic("test panic at the disco")
 }
 
-type bindCaseInsensitive struct {
-}
+type bindCaseInsensitive struct{}
 
 func (b bindCaseInsensitive) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
 	if strings.ToLower(bindDN) == "cn=case,o=testers,c=test" && bindSimplePw == "iLike2test" {
 		return ldap.LDAPResultSuccess, nil
 	}
+
 	return ldap.LDAPResultInvalidCredentials, nil
 }
 
-type searchSimple struct {
-}
+type searchSimple struct{}
 
 func (s searchSimple) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
 	entries := []*ldap.Entry{
@@ -372,11 +366,11 @@ func (s searchSimple) Search(boundDN string, searchReq ldap.SearchRequest, conn 
 			"objectclass":   {"posixaccount"},
 		}),
 	}
+
 	return ServerSearchResult{entries, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
 }
 
-type searchSimple2 struct {
-}
+type searchSimple2 struct{}
 
 func (s searchSimple2) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
 	entries := []*ldap.Entry{
@@ -389,21 +383,19 @@ func (s searchSimple2) Search(boundDN string, searchReq ldap.SearchRequest, conn
 			"objectclass":   {"posixaccount"},
 		}),
 	}
+
 	return ServerSearchResult{entries, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
 }
 
-type searchPanic struct {
-}
+type searchPanic struct{}
 
 func (s searchPanic) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
 	panic("this is a test panic")
 }
 
-type searchControls struct {
-}
+type searchControls struct{}
 
 func (s searchControls) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
-	entries := []*ldap.Entry{}
 	if len(searchReq.Controls) == 1 && searchReq.Controls[0].GetControlType() == "1.2.3.4.5" {
 		newEntry := ldap.NewEntry("cn=hamburger,o=testers,c=testz", map[string][]string{
 			"cn":            {"hamburger"},
@@ -413,13 +405,14 @@ func (s searchControls) Search(boundDN string, searchReq ldap.SearchRequest, con
 			"uid":           {"hamburger"},
 			"objectclass":   {"posixaccount"},
 		})
-		entries = append(entries, newEntry)
+
+		return ServerSearchResult{[]*ldap.Entry{newEntry}, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
 	}
-	return ServerSearchResult{entries, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
+
+	return ServerSearchResult{[]*ldap.Entry{}, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
 }
 
-type searchCaseInsensitive struct {
-}
+type searchCaseInsensitive struct{}
 
 func (s searchCaseInsensitive) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
 	entries := []*ldap.Entry{
@@ -433,6 +426,7 @@ func (s searchCaseInsensitive) Search(boundDN string, searchReq ldap.SearchReque
 			"objectclass":   {"posixaccount"},
 		}),
 	}
+
 	return ServerSearchResult{entries, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
 }
 

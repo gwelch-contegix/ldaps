@@ -2,6 +2,7 @@ package ldaps
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 
@@ -13,13 +14,23 @@ func ApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 	switch ldap.FilterMap[uint64(f.Tag)] {
 	default:
 		log.Printf("Unknown LDAP filter code: %d", f.Tag)
+
 		return false, ldap.LDAPResultOperationsError
 	case "Equality Match":
 		if len(f.Children) != 2 {
 			return false, ldap.LDAPResultOperationsError
 		}
-		attribute := f.Children[0].Value.(string)
-		value := f.Children[1].Value.(string)
+
+		attribute, ok := f.Children[0].Value.(string)
+		if !ok {
+			return false, ldap.LDAPResultOperationsError
+		}
+
+		value, ok := f.Children[1].Value.(string)
+		if !ok {
+			return false, ldap.LDAPResultOperationsError
+		}
+
 		for _, a := range entry.Attributes {
 			if strings.EqualFold(a.Name, attribute) {
 				for _, v := range a.Values {
@@ -45,7 +56,9 @@ func ApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 				return false, ldap.LDAPResultSuccess
 			}
 		}
+
 		return true, ldap.LDAPResultSuccess
+
 	case "Or":
 		anyOk := false
 		for _, child := range f.Children {
@@ -59,6 +72,7 @@ func ApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 		if anyOk {
 			return true, ldap.LDAPResultSuccess
 		}
+
 	case "Not":
 		if len(f.Children) != 1 {
 			return false, ldap.LDAPResultOperationsError
@@ -73,7 +87,10 @@ func ApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 		if len(f.Children) != 2 {
 			return false, ldap.LDAPResultInvalidAttributeSyntax
 		}
-		attribute := f.Children[0].Value.(string)
+		attribute, ok := f.Children[0].Value.(string)
+		if !ok {
+			return false, ldap.LDAPResultOperationsError
+		}
 		for _, a := range entry.Attributes {
 			if strings.EqualFold(a.Name, attribute) {
 				for _, v := range a.Values {
@@ -81,7 +98,7 @@ func ApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 					matched := true
 					for _, search := range f.Children[1].Children {
 						valueBytes := search.Data.Bytes()
-						valueLower := strings.ToLower(string(valueBytes[:]))
+						valueLower := strings.ToLower(string(valueBytes))
 						switch search.Tag {
 						case ldap.FilterSubstringsInitial:
 							matched = matched && strings.HasPrefix(vLower, valueLower)
@@ -99,17 +116,25 @@ func ApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 				}
 			}
 		}
+
 	case "FilterGreaterOrEqual": // TODO
 		log.Println("FilterGreaterOrEqual not implemented")
+
 		return false, ldap.LDAPResultOperationsError
+
 	case "FilterLessOrEqual": // TODO
 		log.Println("FilterLessOrEqual not implemented")
+
 		return false, ldap.LDAPResultOperationsError
+
 	case "FilterApproxMatch": // TODO
 		log.Println("FilterApproxMatch not implemented")
+
 		return false, ldap.LDAPResultOperationsError
+
 	case "FilterExtensibleMatch": // TODO
 		log.Println("FilterExtensibleMatch not implemented")
+
 		return false, ldap.LDAPResultOperationsError
 	}
 
@@ -121,8 +146,10 @@ func GetFilterAttribute(filter string, attr string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	return parseFilterAttribute(f, attr)
 }
+
 func parseFilterAttribute(f *ber.Packet, attr string) (string, error) {
 	attr = strings.ToLower(attr)
 	objectClass := ""
@@ -131,9 +158,22 @@ func parseFilterAttribute(f *ber.Packet, attr string) (string, error) {
 		if len(f.Children) != 2 {
 			return "", errors.New("Equality match must have only two children")
 		}
-		attribute := strings.ToLower(f.Children[0].Value.(string))
-		value := f.Children[1].Value.(string)
-		if attribute == attr {
+		var (
+			attribute string
+			value     string
+			ok        bool
+		)
+		attribute, ok = f.Children[0].Value.(string)
+		if !ok {
+			return "", fmt.Errorf("This should have been a string: %v", f.Children[0].Value)
+		}
+
+		value, ok = f.Children[1].Value.(string)
+		if !ok {
+			return "", fmt.Errorf("This should have been a string: %v", f.Children[1].Value)
+		}
+
+		if strings.EqualFold(attribute, attr) {
 			objectClass = strings.ToLower(value)
 		}
 	case "And":
@@ -167,7 +207,7 @@ func parseFilterAttribute(f *ber.Packet, attr string) (string, error) {
 		if len(subType) > 0 {
 			objectClass = subType
 		}
-
 	}
+
 	return strings.ToLower(objectClass), nil
 }
