@@ -1,0 +1,25 @@
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+    -   id: trailing-whitespace
+    -   id: end-of-file-fixer
+    -   id: check-yaml
+    -   id: check-case-conflict
+    -   id: fix-byte-order-marker
+    -   id: mixed-line-ending
+        args: [--fix=lf]
+    -   id: trailing-whitespace
+-   repo: local
+    hooks:
+    -   id: goimports
+        name: go imports
+        entry: goimports
+        args: [-w, -l]
+        language: golang
+        types: [go]
+        additional_dependencies: [golang.org/x/tools/cmd/goimports@latest]
+-   repo: https://github.com/golangci/golangci-lint
+    rev: v1.51.2
+    hooks:
+    -   id: golangci-lint
