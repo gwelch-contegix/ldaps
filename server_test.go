@@ -2,9 +2,18 @@ package ldaps
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"log"
+	"math/big"
 	"net"
+	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -19,13 +28,228 @@ const (
 	serverBaseDN = "o=testers,c=test"
 )
 
-func TestBindAnonOK(t *testing.T) {
-	quit := make(chan bool)
-	done := make(chan bool)
+type selfSignedCert struct {
+	// Path to the SSL certificates.
+	CACertPath, CertPath string
+
+	// Path to the private keys for the SSL certificates.
+	CAKeyPath, KeyPath string
+}
+
+// mustListen returns a net.Listener listening on a random port.
+func mustListen() (ln net.Listener, actualAddr string) {
+	ln, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		panic(err)
+	}
+
+	return ln, ln.Addr().String()
+}
+
+func newSelfSignedCert() *selfSignedCert {
+	capk, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		panic(err)
+	}
+
+	caSerial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		panic(err)
+	}
+
+	caTemplate := x509.Certificate{
+		SerialNumber: caSerial,
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(7 * 24 * time.Hour),
+
+		KeyUsage:    x509.KeyUsageCertSign,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+
+		BasicConstraintsValid: true,
+
+		Subject: pkix.Name{
+			Organization: []string{"my_test_ca"},
+			CommonName:   "My Test CA",
+		},
+
+		IsCA: true,
+	}
+
+	caCert, err := x509.CreateCertificate(rand.Reader, &caTemplate, &caTemplate, capk.Public(), capk)
+	if err != nil {
+		panic(err)
+	}
+	// fmt.Printf("CA CERT\n%#v\n", caCert)
+	caCertPEM := &pem.Block{Type: "CERTIFICATE", Bytes: caCert}
+	caCertFile, err := os.CreateTemp("", "cacert-*.pem")
+	if err != nil {
+		panic(err)
+	}
+	if err := pem.Encode(caCertFile, caCertPEM); err != nil {
+		panic(err)
+	}
+	caCertFile.Close()
+
+	caKeyFile, err := os.CreateTemp("", "cakey-*.pem")
+	if err != nil {
+		panic(err)
+	}
+	if err := pem.Encode(caKeyFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(capk)}); err != nil {
+		panic(err)
+	}
+	caKeyFile.Close()
+
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		panic(err)
+	}
+	// Basically the same as the CA template, but its own serial, and with ip addresses and dns names.
+	template := x509.Certificate{
+		SerialNumber: serial,
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(7 * 24 * time.Hour),
+
+		KeyUsage:    x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+
+		BasicConstraintsValid: true,
+
+		Subject: pkix.Name{
+			CommonName: "localhost",
+		},
+
+		IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1)},
+		DNSNames:    []string{"localhost"},
+	}
+
+	pk, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		panic(err)
+	}
+	cert, err := x509.CreateCertificate(rand.Reader, &template, &caTemplate, pk.Public(), capk)
+	if err != nil {
+		panic(err)
+	}
+	certPEM := &pem.Block{Type: "CERTIFICATE", Bytes: cert}
+	certFile, err := os.CreateTemp("", "sslcert-*.pem")
+	if err != nil {
+		panic(err)
+	}
+	if err := pem.Encode(certFile, certPEM); err != nil {
+		panic(err)
+	}
+	certFile.Close()
+
+	keyFile, err := os.CreateTemp("", "key-*.pem")
+	if err != nil {
+		panic(err)
+	}
+	if err := pem.Encode(keyFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(pk)}); err != nil {
+		panic(err)
+	}
+	keyFile.Close()
+
+	return &selfSignedCert{
+		CACertPath: caCertFile.Name(),
+		CAKeyPath:  caKeyFile.Name(),
+		CertPath:   certFile.Name(),
+		KeyPath:    keyFile.Name(),
+	}
+}
+
+func (c *selfSignedCert) cleanup() {
+	os.RemoveAll(c.CertPath)
+	os.RemoveAll(c.CACertPath)
+	os.RemoveAll(c.KeyPath)
+	os.RemoveAll(c.CAKeyPath)
+}
+
+func (c *selfSignedCert) ClientTLSConfig() *tls.Config {
+	cert, err := os.ReadFile(c.CACertPath)
+	if err != nil {
+		panic(err)
+	}
+
+	// Return a TLS config that trusts our self-generated CA.
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(cert) {
+		panic("failed to append certificate")
+	}
+	return &tls.Config{
+		RootCAs: pool,
+	}
+}
+
+func (c *selfSignedCert) ServerTLSConfig() *tls.Config {
+	cert, err := tls.LoadX509KeyPair(c.CertPath, c.KeyPath)
+	if err != nil {
+		panic(err)
+	}
+	return &tls.Config{
+		ServerName:   "localhost",
+		Certificates: []tls.Certificate{cert},
+	}
+}
+
+func TestStartTLS(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		defer func() {
+			if t.Failed() {
+				t.Logf(`NOTE: this test won't pass with the built-in Mac ldap utilities.
+Work around this by using brew install openldap, and running the test as PATH=/usr/local/opt/openldap/bin:$PATH go test.
+
+This test uses environment variables that are respected by OpenLDAP, but the Mac utilities don't let you override
+security settings through environment variables; they expect certificates to be added to the system keychain,
+which is very heavy-handed for a test like this.
+`)
+			}
+		}()
+	}
+	cert := newSelfSignedCert()
+	defer cert.cleanup()
+
+	s := NewServer()
+	s.BindFunc("", bindAnonOK{})
+	s.SearchFunc("", searchSimple{})
+
+	s.TLSConfig = cert.ServerTLSConfig()
+
+	ln, addr := mustListen()
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.BindFunc("", bindAnonOK{})
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("s.Serve failed: %s", err.Error())
+		}
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		cmd := exec.Command("env",
+			"LDAPTLS_CACERT="+cert.CACertPath,
+			"ldapsearch", "-H", "ldap://"+addr, "-ZZ", "-d", "-1", "-x", "-b", "o=testers,c=test")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Error(err)
+		}
+
+		if !strings.Contains(string(out), "# numEntries: 3") || !strings.Contains(string(out), "result: 0 Success") {
+			t.Errorf("search did not succeed:\n%s", out)
+		}
+
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		t.Error("ldapsearch command timed out")
+	}
+}
+
+func TestBindAnonOK(t *testing.T) {
+	done := make(chan bool)
+	s := NewServer()
+	s.BindFunc("", bindAnonOK{})
+	go func() {
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -45,15 +269,13 @@ func TestBindAnonOK(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 func TestBindAnonFail(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -74,24 +296,19 @@ func TestBindAnonFail(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	time.Sleep(timeout)
-	quit <- true
+	s.Close()
 }
 
 func TestBindSimpleOK(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.SearchFunc("", searchSimple{})
+	s.BindFunc("", bindSimple{})
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.SearchFunc("", searchSimple{})
-		s.BindFunc("", bindSimple{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
 	}()
-
-	serverBaseDN := serverBaseDN
 
 	go func() {
 		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x",
@@ -108,22 +325,18 @@ func TestBindSimpleOK(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 func TestBindSimpleFailBadPw(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.BindFunc("", bindSimple{})
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.BindFunc("", bindSimple{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
 	}()
-
-	serverBaseDN := serverBaseDN
 
 	go func() {
 		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x",
@@ -140,22 +353,18 @@ func TestBindSimpleFailBadPw(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 func TestBindSimpleFailBadDn(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.BindFunc("", bindSimple{})
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.BindFunc("", bindSimple{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
 	}()
-
-	serverBaseDN := serverBaseDN
 
 	go func() {
 		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x",
@@ -172,19 +381,16 @@ func TestBindSimpleFailBadDn(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 func TestBindSSL(t *testing.T) {
 	ldapURLSSL := "ldaps://" + listenString
 	longerTimeout := time.Millisecond * 300
-	quit := make(chan bool)
 	done := make(chan bool)
-
+	s := NewServer()
+	s.BindFunc("", bindAnonOK{})
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.BindFunc("", bindAnonOK{})
 		if err := s.ListenAndServeTLS(listenString, "tests/cert_DONOTUSE.pem", "tests/key_DONOTUSE.pem"); err != nil {
 			t.Errorf("s.ListenAndServeTLS failed: %s", err.Error())
 		}
@@ -194,7 +400,7 @@ func TestBindSSL(t *testing.T) {
 
 	go func() {
 		cmd := exec.Command("ldapsearch", "-H", ldapURLSSL, "-x", "-b", serverBaseDN)
-		cmd.Env = append(cmd.Environ(), "LDAPTLS_REQCERT=never")
+		cmd.Env = append(cmd.Environ(), "LDAPTLS_REQCERT=ALLOW")
 		out, _ := cmd.CombinedOutput()
 		if !strings.Contains(string(out), "result: 0 Success") {
 			t.Errorf("ldapsearch failed: %v", string(out))
@@ -207,16 +413,14 @@ func TestBindSSL(t *testing.T) {
 	case <-time.After(longerTimeout * 2):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 func TestBindPanic(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.BindFunc("", bindPanic{})
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.BindFunc("", bindPanic{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -236,7 +440,7 @@ func TestBindPanic(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 type testStatsWriter struct {
@@ -253,15 +457,13 @@ func TestSearchStats(t *testing.T) {
 	w := testStatsWriter{&bytes.Buffer{}}
 	log.SetOutput(w)
 
-	quit := make(chan bool)
 	done := make(chan bool)
 	s := NewServer()
 
+	s.SearchFunc("", searchSimple{})
+	s.BindFunc("", bindAnonOK{})
+	s.SetStats(true)
 	go func() {
-		s.QuitChannel(quit)
-		s.SearchFunc("", searchSimple{})
-		s.BindFunc("", bindAnonOK{})
-		s.SetStats(true)
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -282,11 +484,12 @@ func TestSearchStats(t *testing.T) {
 		t.Errorf("ldapsearch command timed out")
 	}
 
-	binds, unbinds, conns := s.GetStats()
-	if conns != 1 || binds != 1 || unbinds != 1 {
+	stats := s.GetStats()
+	log.Println(stats)
+	if stats.Conns != 1 || stats.Binds != 1 || stats.Unbinds != 1 {
 		t.Errorf("Stats data missing or incorrect: %v", w.buffer.String())
 	}
-	quit <- true
+	s.Close()
 }
 
 type bindAnonOK struct{}
@@ -295,7 +498,6 @@ func (b bindAnonOK) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, er
 	if bindDN == "" && bindSimplePw == "" {
 		return ldap.LDAPResultSuccess, nil
 	}
-
 	return ldap.LDAPResultInvalidCredentials, nil
 }
 

@@ -17,6 +17,7 @@ import (
 const (
 	LDAPBindAuthSimple = 0
 	LDAPBindAuthSASL   = 3
+	oidStartTLS        = "1.3.6.1.4.1.1466.20037"
 )
 
 type ExtendedRequest struct {
@@ -73,6 +74,9 @@ type Server struct {
 	Quit        chan bool
 	EnforceLDAP bool
 	Stats       *Stats
+
+	// If set, server will accept StartTLS.
+	TLSConfig *tls.Config
 }
 
 type Stats struct {
@@ -193,12 +197,7 @@ func (server *Server) ListenAndServeTLS(listenString string, certFile string, ke
 	if err != nil {
 		return err
 	}
-	err = server.Serve(ln)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return server.Serve(ln)
 }
 
 func (server *Server) SetStats(enable bool) {
@@ -209,13 +208,12 @@ func (server *Server) SetStats(enable bool) {
 	}
 }
 
-func (server *Server) GetStats() (int, int, int) {
+func (server *Server) GetStats() Stats {
 	defer func() {
 		server.Stats.statsMutex.Unlock()
 	}()
 	server.Stats.statsMutex.Lock()
-
-	return server.Stats.Binds, server.Stats.Unbinds, server.Stats.Conns
+	return *server.Stats
 }
 
 func (server *Server) ListenAndServe(listenString string) error {
@@ -223,12 +221,7 @@ func (server *Server) ListenAndServe(listenString string) error {
 	if err != nil {
 		return err
 	}
-	err = server.Serve(ln)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return server.Serve(ln)
 }
 
 func (server *Server) Serve(ln net.Listener) error {
@@ -255,12 +248,18 @@ listener:
 			go server.handleConnection(c)
 		case <-server.Quit:
 			ln.Close()
-
+			close(server.Quit)
 			break listener
 		}
 	}
 
 	return nil
+}
+
+// Close closes the underlying net.Listener, and waits for confirmation
+func (server *Server) Close() {
+	server.Quit <- true
+	<-server.Quit
 }
 
 func (server *Server) handleConnection(conn net.Conn) {
@@ -270,7 +269,7 @@ handler:
 	for {
 		// read incoming LDAP packet
 		packet, err := ber.ReadPacket(conn)
-		if errors.Is(err, io.EOF) { // Client closed connection
+		if err == io.EOF || err == io.ErrUnexpectedEOF { // Client closed connection
 			break
 		} else if err != nil {
 			log.Printf("handleConnection ber.ReadPacket ERROR: %s", err.Error())
@@ -285,12 +284,13 @@ handler:
 			break
 		}
 		// check the message ID and ClassType
-		messageID, ok := packet.Children[0].Value.(int64)
+		messageID64, ok := packet.Children[0].Value.(int64)
 		if !ok {
 			log.Printf("malformed messageID: %T: %#v", packet.Children[0].Value, packet.Children[0].Value)
 
 			break
 		}
+		messageID := uint64(messageID64)
 		req := packet.Children[1]
 		if req.ClassType != ber.ClassApplication {
 			log.Print("req.ClassType != ber.ClassApplication")
@@ -372,12 +372,27 @@ handler:
 
 			break handler // simply disconnect
 		case ldap.ApplicationExtendedRequest:
-			LDAPResultCode := HandleExtendedRequest(req, boundDN, server.ExtendedFns, conn)
-			responsePacket := encodeLDAPResponse(messageID, ldap.ApplicationExtendedResponse, LDAPResultCode, ldap.LDAPResultCodeMap[LDAPResultCode])
+			var tlsConn *tls.Conn
+			if n := len(req.Children); n == 1 || n == 2 {
+				if name := ber.DecodeString(req.Children[0].Data.Bytes()); name == oidStartTLS {
+					tlsConn = tls.Server(conn, server.TLSConfig)
+				}
+			}
+			var ldapResultCode uint16
+			if tlsConn == nil {
+				// Wasn't an upgrade. Pass through.
+				ldapResultCode = HandleExtendedRequest(req, boundDN, server.ExtendedFns, conn)
+			} else {
+				ldapResultCode = ldap.LDAPResultSuccess
+			}
+			responsePacket := encodeLDAPResponse(messageID, ldap.ApplicationExtendedResponse, ldapResultCode, ldap.LDAPResultCodeMap[ldapResultCode])
 			if err = sendPacket(conn, responsePacket); err != nil {
 				log.Printf("sendPacket error %s", err.Error())
 
 				break handler
+			}
+			if tlsConn != nil {
+				conn = tlsConn
 			}
 		case ldap.ApplicationAbandonRequest:
 			err = HandleAbandonRequest(req, boundDN, server.AbandonFns, conn)
@@ -471,7 +486,7 @@ func routeFunc(dn string, funcNames []string) string {
 	return bestPick
 }
 
-func encodeLDAPResponse(messageID int64, responseType ber.Tag, LDAPResultCode uint16, message string) *ber.Packet {
+func encodeLDAPResponse(messageID uint64, responseType ber.Tag, LDAPResultCode uint16, message string) *ber.Packet {
 	responsePacket := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Response")
 	responsePacket.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, messageID, "Message ID"))
 

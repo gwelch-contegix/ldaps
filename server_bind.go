@@ -72,7 +72,7 @@ func HandleBindRequest(req *ber.Packet, fns map[string]Binder, conn net.Conn) (r
 	}
 }
 
-func encodeBindResponse(messageID int64, LDAPResultCode uint16) *ber.Packet {
+func encodeBindResponse(messageID uint64, LDAPResultCode uint16) *ber.Packet {
 	responsePacket := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Response")
 	responsePacket.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, messageID, "Message ID"))
 

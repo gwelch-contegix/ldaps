@@ -10,7 +10,7 @@ import (
 	"github.com/go-ldap/ldap/v3"
 )
 
-func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID int64, boundDN string, server *Server, conn net.Conn) (resultErr error) {
+func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID uint64, boundDN string, server *Server, conn net.Conn) (resultErr error) {
 	defer func() {
 		if r := recover(); r != nil {
 			resultErr = ldap.NewError(ldap.LDAPResultOperationsError, fmt.Errorf("Search function panic: %s", r))
@@ -192,7 +192,7 @@ func filterAttributes(entry *ldap.Entry, attributes []string) *ldap.Entry {
 	return entry
 }
 
-func encodeSearchResponse(messageID int64, res *ldap.Entry) *ber.Packet {
+func encodeSearchResponse(messageID uint64, res *ldap.Entry) *ber.Packet {
 	responsePacket := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Response")
 	responsePacket.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, messageID, "Message ID"))
 
@@ -224,7 +224,7 @@ func encodeSearchAttribute(name string, values []string) *ber.Packet {
 	return packet
 }
 
-func encodeSearchDone(messageID int64, LDAPResultCode uint16) *ber.Packet {
+func encodeSearchDone(messageID uint64, LDAPResultCode uint16) *ber.Packet {
 	responsePacket := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Response")
 	responsePacket.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, messageID, "Message ID"))
 

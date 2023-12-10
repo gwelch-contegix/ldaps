@@ -8,13 +8,11 @@ import (
 )
 
 func TestSearchSimpleOK(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.SearchFunc("", searchSimple{})
+	s.BindFunc("", bindSimple{})
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.SearchFunc("", searchSimple{})
-		s.BindFunc("", bindSimple{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -44,18 +42,16 @@ func TestSearchSimpleOK(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 func TestSearchSizelimit(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.EnforceLDAP = true
+	s.SearchFunc("", searchSimple{})
+	s.BindFunc("", bindSimple{})
 	go func() {
-		s := NewServer()
-		s.EnforceLDAP = true
-		s.QuitChannel(quit)
-		s.SearchFunc("", searchSimple{})
-		s.BindFunc("", bindSimple{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -139,19 +135,17 @@ func TestSearchSizelimit(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 func TestBindSearchMulti(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.BindFunc("", bindSimple{})
+	s.BindFunc("c=testz", bindSimple2{})
+	s.SearchFunc("", searchSimple{})
+	s.SearchFunc("c=testz", searchSimple2{})
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.BindFunc("", bindSimple{})
-		s.BindFunc("c=testz", bindSimple2{})
-		s.SearchFunc("", searchSimple{})
-		s.SearchFunc("c=testz", searchSimple2{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -184,18 +178,15 @@ func TestBindSearchMulti(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-
-	quit <- true
+	s.Close()
 }
 
 func TestSearchPanic(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.SearchFunc("", searchPanic{})
+	s.BindFunc("", bindAnonOK{})
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.SearchFunc("", searchPanic{})
-		s.BindFunc("", bindAnonOK{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -215,7 +206,7 @@ func TestSearchPanic(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 type compileSearchFilterTest struct {
@@ -253,14 +244,12 @@ var searchFilterTestFilters = []compileSearchFilterTest{
 }
 
 func TestSearchFiltering(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.EnforceLDAP = true
+	s.SearchFunc("", searchSimple{})
+	s.BindFunc("", bindSimple{})
 	go func() {
-		s := NewServer()
-		s.EnforceLDAP = true
-		s.QuitChannel(quit)
-		s.SearchFunc("", searchSimple{})
-		s.BindFunc("", bindSimple{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -285,18 +274,16 @@ func TestSearchFiltering(t *testing.T) {
 			t.Errorf("ldapsearch command timed out")
 		}
 	}
-	quit <- true
+	s.Close()
 }
 
 func TestSearchAttributes(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.EnforceLDAP = true
+	s.SearchFunc("", searchSimple{})
+	s.BindFunc("", bindSimple{})
 	go func() {
-		s := NewServer()
-		s.EnforceLDAP = true
-		s.QuitChannel(quit)
-		s.SearchFunc("", searchSimple{})
-		s.BindFunc("", bindSimple{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -328,18 +315,16 @@ func TestSearchAttributes(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 func TestSearchAllUserAttributes(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.EnforceLDAP = true
+	s.SearchFunc("", searchSimple{})
+	s.BindFunc("", bindSimple{})
 	go func() {
-		s := NewServer()
-		s.EnforceLDAP = true
-		s.QuitChannel(quit)
-		s.SearchFunc("", searchSimple{})
-		s.BindFunc("", bindSimple{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -380,18 +365,16 @@ func TestSearchAllUserAttributes(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 func TestSearchScope(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.EnforceLDAP = true
+	s.SearchFunc("", searchSimple{})
+	s.BindFunc("", bindSimple{})
 	go func() {
-		s := NewServer()
-		s.EnforceLDAP = true
-		s.QuitChannel(quit)
-		s.SearchFunc("", searchSimple{})
-		s.BindFunc("", bindSimple{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -439,18 +422,16 @@ func TestSearchScope(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 func TestSearchScopeCaseInsensitive(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.EnforceLDAP = true
+	s.SearchFunc("", searchCaseInsensitive{})
+	s.BindFunc("", bindCaseInsensitive{})
 	go func() {
-		s := NewServer()
-		s.EnforceLDAP = true
-		s.QuitChannel(quit)
-		s.SearchFunc("", searchCaseInsensitive{})
-		s.BindFunc("", bindCaseInsensitive{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -472,17 +453,15 @@ func TestSearchScopeCaseInsensitive(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 func TestSearchControls(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.SearchFunc("", searchControls{})
+	s.BindFunc("", bindSimple{})
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.SearchFunc("", searchControls{})
-		s.BindFunc("", bindSimple{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -523,5 +502,5 @@ func TestSearchControls(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
