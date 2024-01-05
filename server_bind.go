@@ -3,6 +3,7 @@ package ldaps
 import (
 	"log"
 	"net"
+	"runtime/debug"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
 	"github.com/go-ldap/ldap/v3"
@@ -11,6 +12,7 @@ import (
 func HandleBindRequest(req *ber.Packet, fns map[string]Binder, conn net.Conn) (resultCode uint16) {
 	defer func() {
 		if r := recover(); r != nil {
+			log.Printf("Recovered from panic: %s\n%s", r, string(debug.Stack()))
 			resultCode = ldap.LDAPResultOperationsError
 		}
 	}()

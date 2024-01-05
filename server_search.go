@@ -3,7 +3,9 @@ package ldaps
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net"
+	"runtime/debug"
 	"strings"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
@@ -13,18 +15,21 @@ import (
 func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID uint64, boundDN string, server *Server, conn net.Conn) (resultErr error) {
 	defer func() {
 		if r := recover(); r != nil {
+			log.Printf("Recovered from panic in SearchFn: %s\n%s", r, string(debug.Stack()))
 			resultErr = ldap.NewError(ldap.LDAPResultOperationsError, fmt.Errorf("Search function panic: %s", r))
 		}
 	}()
 
 	searchReq, err := parseSearchRequest(req, controls)
 	if err != nil {
-		return ldap.NewError(ldap.LDAPResultOperationsError, err)
+		log.Printf("Error parsing search request: %v", req.Children[1].Value)
+		return err
 	}
 
 	filterPacket, err := ldap.CompileFilter(searchReq.Filter)
 	if err != nil {
-		return ldap.NewError(ldap.LDAPResultOperationsError, err)
+		log.Printf("Error compiling filter: %v", searchReq.Filter)
+		return ldap.NewError(ldap.LDAPResultFilterError, err)
 	}
 
 	fnNames := []string{}
@@ -34,6 +39,7 @@ func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID ui
 	fn := routeFunc(searchReq.BaseDN, fnNames)
 	searchResp, err := server.SearchFns[fn].Search(boundDN, searchReq, conn)
 	if err != nil {
+		log.Printf("SearchFn Error %s", err.Error())
 		return ldap.NewError(searchResp.ResultCode, err)
 	}
 
@@ -55,6 +61,7 @@ func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID ui
 			// filter
 			keep, resultCode := ApplyFilter(filterPacket, entry)
 			if resultCode != ldap.LDAPResultSuccess {
+				log.Printf("Error Applying filter: %v", searchReq.Filter)
 				return ldap.NewError(resultCode, errors.New("ApplyFilter error"))
 			}
 			if !keep {
@@ -92,6 +99,7 @@ func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID ui
 		// respond
 		responsePacket := encodeSearchResponse(messageID, entry)
 		if err = sendPacket(conn, responsePacket); err != nil {
+			log.Printf("Error encoding response: %v", searchReq.Filter)
 			return ldap.NewError(ldap.LDAPResultOperationsError, err)
 		}
 	}
