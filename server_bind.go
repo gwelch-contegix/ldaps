@@ -12,7 +12,7 @@ import (
 func HandleBindRequest(req *ber.Packet, fns map[string]Binder, conn net.Conn) (resultCode uint16) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Recovered from panic: %s\n%s", r, string(debug.Stack()))
+			log.Printf("Recovered from panic in BindFn: %s\n%s", r, string(debug.Stack()))
 			resultCode = ldap.LDAPResultOperationsError
 		}
 	}()
