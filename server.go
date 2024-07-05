@@ -73,7 +73,7 @@ type Server struct {
 	CloseFns    map[string]Closer
 	Quit        chan bool
 	EnforceLDAP bool
-	Stats       *Stats
+	stats       *stats
 
 	// If set, server will accept StartTLS.
 	TLSConfig *tls.Config
@@ -85,7 +85,11 @@ type Stats struct {
 	Unbinds        int
 	Searches       int
 	NotImplemented int
-	statsMutex     sync.Mutex
+}
+
+type stats struct {
+	Stats
+	statsMutex sync.Mutex
 }
 
 type ServerSearchResult struct {
@@ -122,7 +126,7 @@ func NewServer() *Server {
 	s.ExtendedFunc("", d)
 	s.UnbindFunc("", d)
 	s.CloseFunc("", d)
-	s.Stats = nil
+	s.stats = nil
 
 	return s
 }
@@ -202,18 +206,18 @@ func (server *Server) ListenAndServeTLS(listenString string, certFile string, ke
 
 func (server *Server) SetStats(enable bool) {
 	if enable {
-		server.Stats = &Stats{}
+		server.stats = &stats{}
 	} else {
-		server.Stats = nil
+		server.stats = nil
 	}
 }
 
 func (server *Server) GetStats() Stats {
 	defer func() {
-		server.Stats.statsMutex.Unlock()
+		server.stats.statsMutex.Unlock()
 	}()
-	server.Stats.statsMutex.Lock()
-	return *server.Stats
+	server.stats.statsMutex.Lock()
+	return server.stats.Stats
 }
 
 func (server *Server) ListenAndServe(listenString string) error {
@@ -244,7 +248,7 @@ listener:
 	for {
 		select {
 		case c := <-newConn:
-			server.Stats.countConns(1)
+			server.stats.countConns(1)
 			go server.handleConnection(c)
 		case <-server.Quit:
 			ln.Close()
@@ -269,7 +273,7 @@ handler:
 	for {
 		// read incoming LDAP packet
 		packet, err := ber.ReadPacket(conn)
-		if err == io.EOF || err == io.ErrUnexpectedEOF { // Client closed connection
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) { // Client closed connection
 			break
 		} else if err != nil {
 			log.Printf("handleConnection ber.ReadPacket ERROR: %s", err.Error())
@@ -327,7 +331,7 @@ handler:
 			break handler
 
 		case ldap.ApplicationBindRequest:
-			server.Stats.countBinds(1)
+			server.stats.countBinds(1)
 			LDAPResultCode := HandleBindRequest(req, server.BindFns, conn)
 			if LDAPResultCode == ldap.LDAPResultSuccess {
 				boundDN, ok = req.Children[1].Value.(string)
@@ -344,7 +348,7 @@ handler:
 				break handler
 			}
 		case ldap.ApplicationSearchRequest:
-			server.Stats.countSearches(1)
+			server.stats.countSearches(1)
 			if err := HandleSearchRequest(req, &controls, messageID, boundDN, server, conn); err != nil {
 				log.Printf("handleSearchRequest error %s", err.Error()) // TODO: make this more testable/better err handling - stop using log, stop using breaks?
 				e := &ldap.Error{}
@@ -368,7 +372,7 @@ handler:
 				}
 			}
 		case ldap.ApplicationUnbindRequest:
-			server.Stats.countUnbinds(1)
+			server.stats.countUnbinds(1)
 
 			break handler // simply disconnect
 		case ldap.ApplicationExtendedRequest:
@@ -550,7 +554,7 @@ func (h defaultHandler) Close(boundDN string, conn net.Conn) error {
 	return nil
 }
 
-func (stats *Stats) countConns(delta int) {
+func (stats *stats) countConns(delta int) {
 	if stats != nil {
 		stats.statsMutex.Lock()
 		stats.Conns += delta
@@ -558,7 +562,7 @@ func (stats *Stats) countConns(delta int) {
 	}
 }
 
-func (stats *Stats) countBinds(delta int) {
+func (stats *stats) countBinds(delta int) {
 	if stats != nil {
 		stats.statsMutex.Lock()
 		stats.Binds += delta
@@ -566,7 +570,7 @@ func (stats *Stats) countBinds(delta int) {
 	}
 }
 
-func (stats *Stats) countUnbinds(delta int) {
+func (stats *stats) countUnbinds(delta int) {
 	if stats != nil {
 		stats.statsMutex.Lock()
 		stats.Unbinds += delta
@@ -574,7 +578,7 @@ func (stats *Stats) countUnbinds(delta int) {
 	}
 }
 
-func (stats *Stats) countSearches(delta int) {
+func (stats *stats) countSearches(delta int) {
 	if stats != nil {
 		stats.statsMutex.Lock()
 		stats.Searches += delta
@@ -582,7 +586,7 @@ func (stats *Stats) countSearches(delta int) {
 	}
 }
 
-func (stats *Stats) countNotImplemented(delta int) {
+func (stats *stats) countNotImplemented(delta int) {
 	if stats != nil {
 		stats.statsMutex.Lock()
 		stats.NotImplemented += delta
