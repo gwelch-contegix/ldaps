@@ -332,7 +332,7 @@ handler:
 
 		case ldap.ApplicationBindRequest:
 			server.stats.countBinds(1)
-			LDAPResultCode := HandleBindRequest(req, server.BindFns, conn)
+			LDAPResultCode, err := HandleBindRequest(req, server.BindFns, conn)
 			if LDAPResultCode == ldap.LDAPResultSuccess {
 				boundDN, ok = req.Children[1].Value.(string)
 				if !ok {
@@ -341,7 +341,11 @@ handler:
 					break handler
 				}
 			}
-			responsePacket := encodeBindResponse(messageID, LDAPResultCode)
+			errorMessage := ""
+			if err != nil {
+				errorMessage = err.Error()
+			}
+			responsePacket := encodeBindResponse(messageID, LDAPResultCode, errorMessage)
 			if err = sendPacket(conn, responsePacket); err != nil {
 				log.Printf("sendPacket error %s", err.Error())
 
