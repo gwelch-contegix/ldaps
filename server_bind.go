@@ -15,8 +15,8 @@ import (
 func HandleBindRequest(req *ber.Packet, fns map[string]Binder, conn net.Conn) (res *ldap.SimpleBindResult, resultErr error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Recovered from panic in BindFn: %s\n%s", r, string(debug.Stack()))
-			resultErr = fmt.Errorf("Bind function panic: %s", r)
+			// log.Printf("Recovered from panic in BindFn: %s\n%s", r, string(debug.Stack()))
+			resultErr = fmt.Errorf("Bind function panic: %s at %s", r, string(debug.Stack()))
 		}
 	}()
 
@@ -60,7 +60,8 @@ func HandleBindRequest(req *ber.Packet, fns map[string]Binder, conn net.Conn) (r
 
 		fn := routeFunc(bindDN, fnNames)
 
-		return fns[fn].Bind(bindDN, bindAuth.Data.String(), conn)
+		ret, err := fns[fn].Bind(bindDN, bindAuth.Data.String(), conn)
+		return ret, err
 
 	case LDAPBindAuthSASL:
 		log.Print("SASL authentication is not supported")

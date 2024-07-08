@@ -15,8 +15,8 @@ import (
 func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID uint64, boundDN string, server *Server, conn net.Conn) (resultErr error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Recovered from panic in SearchFn: %s\n%s", r, string(debug.Stack()))
-			resultErr = ldap.NewError(ldap.LDAPResultOperationsError, fmt.Errorf("Search function panic: %s", r))
+			// log.Printf("Recovered from panic in SearchFn: %s\n%s", r, string(debug.Stack()))
+			resultErr = fmt.Errorf("Search function panic: %s at %s", r, string(debug.Stack()))
 		}
 	}()
 

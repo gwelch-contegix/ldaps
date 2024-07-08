@@ -302,7 +302,7 @@ handler:
 				name = "Unknown"
 			}
 			log.Printf("Unhandled operation: %s [%d]", name, req.Tag)
-			responsePacket := encodeLDAPResponse(messageID, ldap.ApplicationUnbindRequest, ldap.LDAPResultNotSupported, fmt.Sprintf("Unhandled operation: %s [%d]", name, req.Tag))
+			responsePacket := encodeLDAPResponse(messageID, ldap.ApplicationUnbindRequest, ldap.LDAPResultUnavailable, fmt.Sprintf("Unhandled operation: %s [%d]", name, req.Tag))
 			if err = sendPacket(conn, responsePacket); err != nil {
 				log.Printf("sendPacket error %s", err.Error())
 			}
@@ -322,10 +322,11 @@ handler:
 			}
 			var ldapResultCode uint16
 			ldapResultCode = ldap.LDAPResultSuccess
-			if tlsConn != nil {
+			if tlsConn == nil {
 				// Wasn't an upgrade. We don't support other Extended requestes
-				ldapResultCode = ldap.LDAPResultNotSupported
+				ldapResultCode = ldap.LDAPResultUnavailable
 			}
+
 			responsePacket := encodeLDAPResponse(messageID, ldap.ApplicationExtendedResponse, ldapResultCode, ldap.LDAPResultCodeMap[ldapResultCode])
 			if err = sendPacket(conn, responsePacket); err != nil {
 				log.Printf("sendPacket error %s", err.Error())
@@ -351,8 +352,9 @@ handler:
 			if err != nil {
 				e := &ldap.Error{}
 				if !errors.As(err, &e) {
-					e = &ldap.Error{ResultCode: ldap.LDAPResultOther, Err: errors.New("Internal Error")}
-					err = e // Don't leak internal errors
+					e = &ldap.Error{ResultCode: ldap.LDAPResultOperationsError, Err: errors.New("Internal Error")}
+				} else if e.Err == nil {
+					e.Err = errors.New("")
 				}
 				resultCode = e.ResultCode
 				message = e.Err.Error()
@@ -371,8 +373,9 @@ handler:
 			if err != nil {
 				e := &ldap.Error{}
 				if !errors.As(err, &e) {
-					e = &ldap.Error{ResultCode: ldap.LDAPResultOther, Err: errors.New("Internal Error")}
-					err = e // Don't leak internal errors
+					e = &ldap.Error{ResultCode: ldap.LDAPResultOperationsError, Err: errors.New("Internal Error")}
+				} else if e.Err == nil {
+					e.Err = errors.New("")
 				}
 				resultCode = e.ResultCode
 				message = e.Err.Error()
@@ -391,11 +394,14 @@ handler:
 			if err != nil {
 				e := &ldap.Error{}
 				if !errors.As(err, &e) {
-					e = &ldap.Error{ResultCode: ldap.LDAPResultOther, Err: errors.New("Internal Error")}
-					err = e // Don't leak internal errors
+					e = &ldap.Error{ResultCode: ldap.LDAPResultOperationsError, Err: errors.New("Internal Error")}
+				} else if e.Err == nil {
+					e.Err = errors.New("")
 				}
 				resultCode = e.ResultCode
-				message = e.Err.Error()
+				if e.Err != nil {
+					message = e.Err.Error()
+				}
 			}
 
 			if err = sendPacket(conn, encodeLDAPResponse(messageID, ldap.ApplicationAddResponse, resultCode, message)); err != nil {
@@ -410,7 +416,9 @@ handler:
 			if err != nil {
 				e := &ldap.Error{}
 				if !errors.As(err, &e) {
-					e = &ldap.Error{ResultCode: ldap.LDAPResultOther, Err: errors.New("Internal Error")}
+					e = &ldap.Error{ResultCode: ldap.LDAPResultOperationsError, Err: errors.New("Internal Error")}
+				} else if e.Err == nil {
+					e.Err = errors.New("")
 				}
 				resultCode = e.ResultCode
 				message = e.Err.Error()
@@ -428,7 +436,9 @@ handler:
 			if err != nil {
 				e := &ldap.Error{}
 				if !errors.As(err, &e) {
-					e = &ldap.Error{ResultCode: ldap.LDAPResultOther, Err: errors.New("Internal Error")}
+					e = &ldap.Error{ResultCode: ldap.LDAPResultOperationsError, Err: errors.New("Internal Error")}
+				} else if e.Err == nil {
+					e.Err = errors.New("")
 				}
 				resultCode = e.ResultCode
 				message = e.Err.Error()
@@ -446,7 +456,9 @@ handler:
 			if err != nil {
 				e := &ldap.Error{}
 				if !errors.As(err, &e) {
-					e = &ldap.Error{ResultCode: ldap.LDAPResultOther, Err: errors.New("Internal Error")}
+					e = &ldap.Error{ResultCode: ldap.LDAPResultOperationsError, Err: errors.New("Internal Error")}
+				} else if e.Err == nil {
+					e.Err = errors.New("")
 				}
 				resultCode = e.ResultCode
 				message = e.Err.Error()
@@ -464,7 +476,9 @@ handler:
 			if err != nil {
 				e := &ldap.Error{}
 				if !errors.As(err, &e) {
-					e = &ldap.Error{ResultCode: ldap.LDAPResultOther, Err: errors.New("Internal Error")}
+					e = &ldap.Error{ResultCode: ldap.LDAPResultOperationsError, Err: errors.New("Internal Error")}
+				} else if e.Err == nil {
+					e.Err = errors.New("")
 				}
 				resultCode = e.ResultCode
 				message = e.Err.Error()
@@ -536,41 +550,41 @@ func encodeLDAPResponse(messageID uint64, responseType ber.Tag, LDAPResultCode u
 type defaultHandler struct{}
 
 func (h defaultHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
-	return nil, ldap.NewError(ldap.LDAPResultNotSupported, errors.New("Not Implemented"))
+	return nil, ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
 func (h defaultHandler) Search(boundDN string, req ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
-	return ServerSearchResult{ResultCode: ldap.LDAPResultNotSupported}, ldap.NewError(ldap.LDAPResultNotSupported, errors.New("Not Implemented"))
+	return ServerSearchResult{ResultCode: ldap.LDAPResultUnavailable}, ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
 func (h defaultHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) error {
-	return ldap.NewError(ldap.LDAPResultNotSupported, errors.New("Not Implemented"))
+	return ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
 func (h defaultHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.Conn) (*ldap.ModifyResult, error) {
-	return nil, ldap.NewError(ldap.LDAPResultNotSupported, errors.New("Not Implemented"))
+	return nil, ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
 func (h defaultHandler) Delete(boundDN, deleteDN string, conn net.Conn) error {
-	return ldap.NewError(ldap.LDAPResultNotSupported, errors.New("Not Implemented"))
+	return ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
 func (h defaultHandler) ModifyDN(boundDN string, req ldap.ModifyDNRequest, conn net.Conn) error {
-	return ldap.NewError(ldap.LDAPResultNotSupported, errors.New("Not Implemented"))
+	return ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
 func (h defaultHandler) Compare(boundDN string, req ldap.CompareRequest, conn net.Conn) error {
-	return ldap.NewError(ldap.LDAPResultNotSupported, errors.New("Not Implemented"))
+	return ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
 func (h defaultHandler) Abandon(boundDN string, conn net.Conn) error {
-	return ldap.NewError(ldap.LDAPResultNotSupported, errors.New("Not Implemented"))
+	return ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
 func (h defaultHandler) Close(boundDN string, conn net.Conn) error {
 	conn.Close()
 
-	return ldap.NewError(ldap.LDAPResultNotSupported, errors.New("Not Implemented"))
+	return ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
 func (stats *stats) countConns(delta int) {

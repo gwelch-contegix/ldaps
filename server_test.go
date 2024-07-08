@@ -8,12 +8,12 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"log"
 	"math/big"
 	"net"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -192,19 +192,6 @@ func (c *selfSignedCert) ServerTLSConfig() *tls.Config {
 }
 
 func TestStartTLS(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		defer func() {
-			if t.Failed() {
-				t.Logf(`NOTE: this test won't pass with the built-in Mac ldap utilities.
-Work around this by using brew install openldap, and running the test as PATH=/usr/local/opt/openldap/bin:$PATH go test.
-
-This test uses environment variables that are respected by OpenLDAP, but the Mac utilities don't let you override
-security settings through environment variables; they expect certificates to be added to the system keychain,
-which is very heavy-handed for a test like this.
-`)
-			}
-		}()
-	}
 	cert := newSelfSignedCert()
 	defer cert.cleanup()
 
@@ -224,7 +211,7 @@ which is very heavy-handed for a test like this.
 	done := make(chan struct{})
 	go func() {
 		cmd := exec.Command("env",
-			"LDAPTLS_CACERT="+cert.CACertPath,
+			"LDAPTLS_REQCERT=ALLOW", // We don't care about testing validity we just want TLS to work
 			"ldapsearch", "-H", "ldap://"+addr, "-ZZ", "-d", "-1", "-x", "-b", "o=testers,c=test")
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -248,6 +235,7 @@ which is very heavy-handed for a test like this.
 func TestBindAnonOK(t *testing.T) {
 	done := make(chan bool)
 	s := NewServer()
+	s.SearchFunc("", searchSimple{})
 	s.BindFunc("", bindAnonOK{})
 	go func() {
 		if err := s.ListenAndServe(listenString); err != nil {
@@ -256,7 +244,7 @@ func TestBindAnonOK(t *testing.T) {
 	}()
 
 	go func() {
-		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", serverBaseDN)
+		cmd := exec.Command("ldapsearch", "-v", "-H", ldapURL, "-x", "-b", serverBaseDN)
 		out, _ := cmd.CombinedOutput()
 		if !strings.Contains(string(out), "result: 0 Success") {
 			t.Errorf("ldapsearch failed: %v", string(out))
@@ -275,6 +263,7 @@ func TestBindAnonOK(t *testing.T) {
 func TestBindAnonFail(t *testing.T) {
 	done := make(chan bool)
 	s := NewServer()
+	s.BindFunc("", bindSimple{})
 	go func() {
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
@@ -389,6 +378,7 @@ func TestBindSSL(t *testing.T) {
 	longerTimeout := time.Millisecond * 300
 	done := make(chan bool)
 	s := NewServer()
+	s.SearchFunc("", searchSimple{})
 	s.BindFunc("", bindAnonOK{})
 	go func() {
 		if err := s.ListenAndServeTLS(listenString, "tests/cert_DONOTUSE.pem", "tests/key_DONOTUSE.pem"); err != nil {
@@ -494,47 +484,47 @@ func TestSearchStats(t *testing.T) {
 
 type bindAnonOK struct{}
 
-func (b bindAnonOK) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
+func (b bindAnonOK) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	if bindDN == "" && bindSimplePw == "" {
-		return ldap.LDAPResultSuccess, nil
+		return nil, nil
 	}
-	return ldap.LDAPResultInvalidCredentials, nil
+	return nil, ldap.NewError(ldap.LDAPResultInvalidCredentials, errors.New(""))
 }
 
 type bindSimple struct{}
 
-func (b bindSimple) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
+func (b bindSimple) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	if bindDN == "cn=testy,o=testers,c=test" && bindSimplePw == "iLike2test" {
-		return ldap.LDAPResultSuccess, nil
+		return nil, nil
 	}
 
-	return ldap.LDAPResultInvalidCredentials, nil
+	return nil, ldap.NewError(ldap.LDAPResultInvalidCredentials, errors.New(""))
 }
 
 type bindSimple2 struct{}
 
-func (b bindSimple2) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
+func (b bindSimple2) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	if bindDN == "cn=testy,o=testers,c=testz" && bindSimplePw == "ZLike2test" {
-		return ldap.LDAPResultSuccess, nil
+		return nil, nil
 	}
 
-	return ldap.LDAPResultInvalidCredentials, nil
+	return nil, ldap.NewError(ldap.LDAPResultInvalidCredentials, errors.New(""))
 }
 
 type bindPanic struct{}
 
-func (b bindPanic) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
+func (b bindPanic) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	panic("test panic at the disco")
 }
 
 type bindCaseInsensitive struct{}
 
-func (b bindCaseInsensitive) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
+func (b bindCaseInsensitive) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	if strings.ToLower(bindDN) == "cn=case,o=testers,c=test" && bindSimplePw == "iLike2test" {
-		return ldap.LDAPResultSuccess, nil
+		return nil, nil
 	}
 
-	return ldap.LDAPResultInvalidCredentials, nil
+	return nil, ldap.NewError(ldap.LDAPResultInvalidCredentials, errors.New(""))
 }
 
 type searchSimple struct{}
