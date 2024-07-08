@@ -25,7 +25,7 @@ type Binder interface {
 	Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error)
 }
 type Searcher interface {
-	Search(boundDN string, req ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error)
+	Search(boundDN string, req ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error)
 }
 type Modifier interface {
 	Modify(boundDN string, req ldap.ModifyRequest, conn net.Conn) (*ldap.ModifyResult, error)
@@ -46,7 +46,7 @@ type Abandoner interface {
 	Abandon(boundDN string, conn net.Conn) error
 }
 type Closer interface {
-	Close(boundDN string, conn net.Conn) error
+	Close(boundDN string, conn net.Conn)
 }
 
 type Server struct {
@@ -78,13 +78,6 @@ type Stats struct {
 type stats struct {
 	Stats
 	statsMutex sync.Mutex
-}
-
-type ServerSearchResult struct {
-	Entries    []*ldap.Entry
-	Referrals  []string
-	Controls   []ldap.Control
-	ResultCode uint16
 }
 
 func NewServer() *Server {
@@ -172,11 +165,12 @@ func (server *Server) ListenAndServeTLS(listenString string, certFile string, ke
 			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 		},
 	}
-	tlsConfig.ServerName = "localhost"
+
 	ln, err := tls.Listen("tcp", listenString, &tlsConfig)
 	if err != nil {
 		return err
 	}
+
 	return server.Serve(ln)
 }
 
@@ -193,6 +187,7 @@ func (server *Server) GetStats() Stats {
 		server.stats.statsMutex.Unlock()
 	}()
 	server.stats.statsMutex.Lock()
+
 	return server.stats.Stats
 }
 
@@ -201,6 +196,7 @@ func (server *Server) ListenAndServe(listenString string) error {
 	if err != nil {
 		return err
 	}
+
 	return server.Serve(ln)
 }
 
@@ -229,6 +225,7 @@ listener:
 		case <-server.Quit:
 			ln.Close()
 			close(server.Quit)
+
 			break listener
 		}
 	}
@@ -290,9 +287,6 @@ handler:
 				}
 			}
 		}
-
-		// log.Printf("DEBUG: handling operation: %s [%d]", ApplicationMap[req.Tag], req.Tag)
-		// ber.PrintPacket(packet) // DEBUG
 
 		// dispatch the LDAP operation
 		switch req.Tag { // ldap op code
@@ -359,6 +353,9 @@ handler:
 				resultCode = e.ResultCode
 				message = e.Err.Error()
 			}
+			if resultCode != ldap.LDAPResultSuccess {
+				log.Printf("Error Binding: %s", err)
+			}
 
 			if err = sendPacket(conn, encodeLDAPResponse(messageID, ldap.ApplicationBindResponse, resultCode, message)); err != nil {
 				log.Printf("sendPacket error: %s", err.Error())
@@ -379,6 +376,9 @@ handler:
 				}
 				resultCode = e.ResultCode
 				message = e.Err.Error()
+			}
+			if resultCode != ldap.LDAPResultSuccess {
+				log.Printf("Error Searching: %s", err)
 			}
 
 			if err = sendPacket(conn, encodeLDAPResponse(messageID, ldap.ApplicationSearchResultDone, resultCode, message)); err != nil {
@@ -401,6 +401,9 @@ handler:
 				resultCode = e.ResultCode
 				if e.Err != nil {
 					message = e.Err.Error()
+					if resultCode != ldap.LDAPResultSuccess {
+						log.Printf("Error Adding: %s", err)
+					}
 				}
 			}
 
@@ -423,6 +426,9 @@ handler:
 				resultCode = e.ResultCode
 				message = e.Err.Error()
 			}
+			if resultCode != ldap.LDAPResultSuccess {
+				log.Printf("Error Modifying: %s", err)
+			}
 
 			if err = sendPacket(conn, encodeLDAPResponse(messageID, ldap.ApplicationModifyResponse, resultCode, message)); err != nil {
 				log.Printf("sendPacket error: %s", err.Error())
@@ -442,6 +448,9 @@ handler:
 				}
 				resultCode = e.ResultCode
 				message = e.Err.Error()
+			}
+			if resultCode != ldap.LDAPResultSuccess {
+				log.Printf("Error Deleting: %s", err)
 			}
 
 			if err = sendPacket(conn, encodeLDAPResponse(messageID, ldap.ApplicationDelResponse, resultCode, message)); err != nil {
@@ -463,6 +472,9 @@ handler:
 				resultCode = e.ResultCode
 				message = e.Err.Error()
 			}
+			if !(resultCode == ldap.LDAPResultSuccess || resultCode == ldap.LDAPResultCompareFalse || resultCode == ldap.LDAPResultCompareTrue) {
+				log.Printf("Error Modifying DN: %s", err)
+			}
 
 			if err = sendPacket(conn, encodeLDAPResponse(messageID, ldap.ApplicationModifyDNResponse, resultCode, message)); err != nil {
 				log.Printf("sendPacket error: %s", err.Error())
@@ -474,6 +486,7 @@ handler:
 			message := ""
 			err = HandleCompareRequest(req, boundDN, server.CompareFns, conn)
 			if err != nil {
+				log.Printf("Error Comparing: %s", err)
 				e := &ldap.Error{}
 				if !errors.As(err, &e) {
 					e = &ldap.Error{ResultCode: ldap.LDAPResultOperationsError, Err: errors.New("Internal Error")}
@@ -553,16 +566,16 @@ func (h defaultHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.
 	return nil, ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
-func (h defaultHandler) Search(boundDN string, req ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
-	return ServerSearchResult{ResultCode: ldap.LDAPResultUnavailable}, ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
-}
-
-func (h defaultHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) error {
-	return ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
+func (h defaultHandler) Search(boundDN string, req ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
+	return nil, ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
 func (h defaultHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.Conn) (*ldap.ModifyResult, error) {
 	return nil, ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
+}
+
+func (h defaultHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) error {
+	return ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
 func (h defaultHandler) Delete(boundDN, deleteDN string, conn net.Conn) error {
@@ -581,11 +594,7 @@ func (h defaultHandler) Abandon(boundDN string, conn net.Conn) error {
 	return ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
-func (h defaultHandler) Close(boundDN string, conn net.Conn) error {
-	conn.Close()
-
-	return ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
-}
+func (h defaultHandler) Close(boundDN string, conn net.Conn) {} // conn will be closed automatically
 
 func (stats *stats) countConns(delta int) {
 	if stats != nil {

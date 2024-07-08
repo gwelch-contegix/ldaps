@@ -76,7 +76,7 @@ func TestApplyFilter(t *testing.T) {
 			if matched {
 				status = "matched"
 			}
-			t.Errorf("Entry: %v %s: %q return code: %s", testInfo.Entry, status, testInfo.Filter, ldap.LDAPResultCodeMap[ldapResult])
+			t.Errorf("Entry: %v %s: %q return code: %s", testInfo.Entry, status, testInfo.Filter, ldap.LDAPResultCodeMap[ldapResult.ResultCode])
 		}
 	}
 }

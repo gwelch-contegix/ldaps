@@ -3,7 +3,6 @@ package ldaps
 import (
 	"errors"
 	"fmt"
-	"log"
 	"net"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
@@ -12,39 +11,29 @@ import (
 
 func HandleAddRequest(req *ber.Packet, boundDN string, fns map[string]Adder, conn net.Conn) error {
 	if len(req.Children) != 2 {
-		log.Println("Error invalid add request: no attributes sent")
-
 		return ldap.NewError(ldap.LDAPResultProtocolError, errors.New("Error invalid add request: no attributes sent"))
 	}
 	var ok bool
 	addReq := ldap.AddRequest{}
 	addReq.DN, ok = req.Children[0].Value.(string)
 	if !ok {
-		log.Printf("Error reading DN: %v", req.Children[0].Value)
-
 		return ldap.NewError(ldap.LDAPResultProtocolError, fmt.Errorf("Error reading DN: %v", req.Children[0].Value))
 	}
 	addReq.Attributes = []ldap.Attribute{}
 	for _, attr := range req.Children[1].Children {
 		if len(attr.Children) != 2 {
-			log.Println("Error invalid add request: no attributes sent")
-
 			return ldap.NewError(ldap.LDAPResultProtocolError, errors.New("Error invalid add request: no attributes sent"))
 		}
 
 		a := ldap.Attribute{}
 		a.Type, ok = attr.Children[0].Value.(string)
 		if !ok {
-			log.Printf("Error reading attribute name: %v", attr.Children[0].Value)
-
 			return ldap.NewError(ldap.LDAPResultProtocolError, fmt.Errorf("Error reading attribute name: %v", attr.Children[0].Value))
 		}
 		a.Vals = []string{}
 		for _, val := range attr.Children[1].Children {
 			v, ok := val.Value.(string)
 			if !ok {
-				log.Printf("Error reading attribute value: %v", attr.Children[1].Value)
-
 				return ldap.NewError(ldap.LDAPResultProtocolError, fmt.Errorf("Error reading attribute value: %v", attr.Children[1].Value))
 			}
 			a.Vals = append(a.Vals, v)
@@ -68,27 +57,22 @@ func HandleDeleteRequest(req *ber.Packet, boundDN string, fns map[string]Deleter
 		fnNames = append(fnNames, k)
 	}
 	fn := routeFunc(boundDN, fnNames)
+
 	return fns[fn].Delete(boundDN, deleteDN, conn)
 }
 
 func HandleModifyRequest(req *ber.Packet, boundDN string, fns map[string]Modifier, conn net.Conn) (*ldap.ModifyResult, error) {
 	if len(req.Children) != 2 {
-		log.Println("Error invalid modify request: no attributes sent")
-
 		return nil, ldap.NewError(ldap.LDAPResultProtocolError, errors.New("Error invalid modify request: no attributes sent"))
 	}
 	var ok bool
 	modReq := ldap.ModifyRequest{}
 	modReq.DN, ok = req.Children[0].Value.(string)
 	if !ok {
-		log.Printf("Error reading DN: %v", req.Children[0].Value)
-
 		return nil, ldap.NewError(ldap.LDAPResultProtocolError, fmt.Errorf("Error reading DN: %v", req.Children[0].Value))
 	}
 	for _, change := range req.Children[1].Children {
 		if len(change.Children) != 2 {
-			log.Println("Error invalid modify request: no attributes sent")
-
 			return nil, ldap.NewError(ldap.LDAPResultProtocolError, errors.New("Error invalid modify request: no attributes sent"))
 		}
 
@@ -96,37 +80,27 @@ func HandleModifyRequest(req *ber.Packet, boundDN string, fns map[string]Modifie
 
 		attrs := change.Children[1].Children
 		if len(attrs) != 2 {
-			log.Println("Error invalid modify request: no attributes sent")
-
 			return nil, ldap.NewError(ldap.LDAPResultProtocolError, errors.New("Error invalid modify request: no attributes sent"))
 		}
 
 		attr.Type, ok = attrs[0].Value.(string)
 		if !ok {
-			log.Printf("Error reading modify attribute name: %v", attrs[0].Value)
-
 			return nil, ldap.NewError(ldap.LDAPResultProtocolError, fmt.Errorf("Error reading modify attribute name: %v", attrs[0].Value))
 		}
 
 		for _, val := range attrs[1].Children {
 			v, ok := val.Value.(string)
 			if !ok {
-				log.Printf("Error reading modify attribute value: %v", val.Value)
-
 				return nil, ldap.NewError(ldap.LDAPResultProtocolError, fmt.Errorf("Error reading modify attribute value: %v", val.Value))
 			}
 			attr.Vals = append(attr.Vals, v)
 		}
 		op, ok := change.Children[0].Value.(int64)
 		if !ok {
-			log.Printf("Error reading modify operation type: %v", change.Children[0].Value)
-
 			return nil, ldap.NewError(ldap.LDAPResultProtocolError, fmt.Errorf("Error reading modify operation type: %v", change.Children[0].Value))
 		}
 		switch op {
 		default:
-			log.Printf("Unrecognized modify attribute %d", op)
-
 			return nil, ldap.NewError(ldap.LDAPResultProtocolError, fmt.Errorf("Unrecognized modify attribute %d", op))
 		case ldap.AddAttribute:
 			modReq.Add(attr.Type, attr.Vals)
@@ -149,7 +123,6 @@ func HandleModifyRequest(req *ber.Packet, boundDN string, fns map[string]Modifie
 
 func HandleCompareRequest(req *ber.Packet, boundDN string, fns map[string]Comparer, conn net.Conn) error {
 	if len(req.Children) != 2 {
-		log.Println("Error invalid compare request: no attributes sent")
 
 		return ldap.NewError(ldap.LDAPResultProtocolError, errors.New("Error invalid compare request: no attributes sent"))
 	}
@@ -161,28 +134,24 @@ func HandleCompareRequest(req *ber.Packet, boundDN string, fns map[string]Compar
 
 	compReq.DN, ok = req.Children[0].Value.(string)
 	if !ok {
-		log.Printf("Error reading compare DN: %v", req.Children[0].Value)
 
 		return ldap.NewError(ldap.LDAPResultProtocolError, fmt.Errorf("Error reading compare DN: %v", req.Children[0].Value))
 	}
 
 	ava := req.Children[1]
 	if len(ava.Children) != 2 {
-		log.Println("Error invalid compare request: no attributes sent")
 
 		return ldap.NewError(ldap.LDAPResultProtocolError, errors.New("Error invalid compare request: no attributes sent"))
 	}
 
 	attr, ok := ava.Children[0].Value.(string)
 	if !ok {
-		log.Printf("Error reading compare attribute name: %v", ava.Children[0].Value)
 
 		return ldap.NewError(ldap.LDAPResultProtocolError, fmt.Errorf("Error reading compare attribute name: %v", ava.Children[0].Value))
 	}
 
 	val, ok := ava.Children[1].Value.(string)
 	if !ok {
-		log.Printf("Error reading compare attribute value: %v", ava.Children[1].Value)
 
 		return ldap.NewError(ldap.LDAPResultProtocolError, fmt.Errorf("Error reading compare attribute value: %v", ava.Children[1].Value))
 	}
@@ -206,6 +175,7 @@ func HandleAbandonRequest(req *ber.Packet, boundDN string, fns map[string]Abando
 	}
 
 	fn := routeFunc(boundDN, fnNames)
+
 	return fns[fn].Abandon(boundDN, conn)
 }
 

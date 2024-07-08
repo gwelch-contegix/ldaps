@@ -3,142 +3,143 @@ package ldaps
 import (
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
 	"github.com/go-ldap/ldap/v3"
 )
 
-func ApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
-	switch ldap.FilterMap[uint64(f.Tag)] {
+func ApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, *ldap.Error) {
+	switch f.Tag {
 	default:
-		log.Printf("Unknown LDAP filter code: %d", f.Tag)
 
-		return false, ldap.LDAPResultOperationsError
-	case "Equality Match":
+		return false, &ldap.Error{Err: fmt.Errorf("Unknown LDAP filter code: %d", f.Tag), ResultCode: ldap.LDAPResultFilterError}
+	case ldap.FilterEqualityMatch:
 		if len(f.Children) != 2 {
-			return false, ldap.LDAPResultOperationsError
+			return false, &ldap.Error{Err: errors.New("invalid filter"), ResultCode: ldap.LDAPResultFilterError}
 		}
 
 		attribute, ok := f.Children[0].Value.(string)
 		if !ok {
-			return false, ldap.LDAPResultOperationsError
+			return false, &ldap.Error{Err: errors.New("invalid filter"), ResultCode: ldap.LDAPResultFilterError}
 		}
 
 		value, ok := f.Children[1].Value.(string)
 		if !ok {
-			return false, ldap.LDAPResultOperationsError
+			return false, &ldap.Error{Err: errors.New("invalid filter"), ResultCode: ldap.LDAPResultFilterError}
 		}
 
 		for _, a := range entry.Attributes {
 			if strings.EqualFold(a.Name, attribute) {
 				for _, v := range a.Values {
 					if strings.EqualFold(v, value) {
-						return true, ldap.LDAPResultSuccess
+						return true, nil
 					}
 				}
 			}
 		}
-	case "Present":
+	case ldap.FilterPresent:
 		for _, a := range entry.Attributes {
 			if strings.EqualFold(a.Name, f.Data.String()) {
-				return true, ldap.LDAPResultSuccess
+				return true, nil
 			}
 		}
-	case "And":
+	case ldap.FilterAnd:
 		for _, child := range f.Children {
 			ok, exitCode := ApplyFilter(child, entry)
-			if exitCode != ldap.LDAPResultSuccess {
+			if exitCode != nil || !ok {
 				return false, exitCode
 			}
-			if !ok {
-				return false, ldap.LDAPResultSuccess
-			}
 		}
 
-		return true, ldap.LDAPResultSuccess
+		return true, nil
 
-	case "Or":
-		anyOk := false
+	case ldap.FilterOr:
+		matched := false
 		for _, child := range f.Children {
 			ok, exitCode := ApplyFilter(child, entry)
-			if exitCode != ldap.LDAPResultSuccess {
+			if exitCode != nil {
 				return false, exitCode
 			} else if ok {
-				anyOk = true
+				matched = true
+
+				break
 			}
 		}
-		if anyOk {
-			return true, ldap.LDAPResultSuccess
+		if matched {
+			return true, nil
 		}
 
-	case "Not":
+	case ldap.FilterNot:
 		if len(f.Children) != 1 {
-			return false, ldap.LDAPResultOperationsError
+			return false, &ldap.Error{Err: errors.New("invalid filter"), ResultCode: ldap.LDAPResultFilterError}
 		}
 		ok, exitCode := ApplyFilter(f.Children[0], entry)
-		if exitCode != ldap.LDAPResultSuccess {
+		if exitCode != nil {
 			return false, exitCode
 		} else if !ok {
-			return true, ldap.LDAPResultSuccess
+			return true, nil
 		}
-	case "Substrings":
+	case ldap.FilterSubstrings:
 		if len(f.Children) != 2 {
-			return false, ldap.LDAPResultInvalidAttributeSyntax
+			return false, &ldap.Error{Err: errors.New("invalid filter"), ResultCode: ldap.LDAPResultFilterError}
 		}
 		attribute, ok := f.Children[0].Value.(string)
 		if !ok {
-			return false, ldap.LDAPResultOperationsError
+			return false, &ldap.Error{Err: errors.New("invalid filter"), ResultCode: ldap.LDAPResultFilterError}
 		}
+		var attr *ldap.EntryAttribute
 		for _, a := range entry.Attributes {
 			if strings.EqualFold(a.Name, attribute) {
-				for _, v := range a.Values {
-					vLower := strings.ToLower(v)
-					matched := true
-					for _, search := range f.Children[1].Children {
-						valueBytes := search.Data.Bytes()
-						valueLower := strings.ToLower(string(valueBytes))
-						switch search.Tag {
-						case ldap.FilterSubstringsInitial:
-							matched = matched && strings.HasPrefix(vLower, valueLower)
-						case ldap.FilterSubstringsAny:
-							matched = matched && strings.Contains(vLower, valueLower)
-						case ldap.FilterSubstringsFinal:
-							matched = matched && strings.HasSuffix(vLower, valueLower)
-						default:
-							matched = false
-						}
-					}
-					if matched {
-						return true, ldap.LDAPResultSuccess
-					}
+				attr = a
+
+				break
+			}
+		}
+		if attr == nil {
+			break
+		}
+
+	subStringSearch:
+		for _, v := range attr.Values {
+			value := strings.ToLower(v)
+			matched := false
+
+			for _, s := range f.Children[1].Children {
+				search := strings.ToLower(s.Data.String())
+
+				switch s.Tag {
+				case ldap.FilterSubstringsInitial:
+					matched = strings.HasPrefix(value, search)
+				case ldap.FilterSubstringsAny:
+					matched = strings.Contains(value, search)
+				case ldap.FilterSubstringsFinal:
+					matched = strings.HasSuffix(value, search)
 				}
+				if !matched {
+					break subStringSearch
+				}
+			}
+
+			if matched {
+				return true, nil
 			}
 		}
 
-	case "FilterGreaterOrEqual": // TODO
-		log.Println("FilterGreaterOrEqual not implemented")
+	case ldap.FilterGreaterOrEqual: // TODO
+		return false, &ldap.Error{Err: fmt.Errorf("%s not implemented", ldap.FilterMap[uint64(f.Tag)]), ResultCode: ldap.LDAPResultFilterError}
 
-		return false, ldap.LDAPResultOperationsError
+	case ldap.FilterLessOrEqual: // TODO
+		return false, &ldap.Error{Err: fmt.Errorf("%s not implemented", ldap.FilterMap[uint64(f.Tag)]), ResultCode: ldap.LDAPResultFilterError}
 
-	case "FilterLessOrEqual": // TODO
-		log.Println("FilterLessOrEqual not implemented")
+	case ldap.FilterApproxMatch: // TODO
+		return false, &ldap.Error{Err: fmt.Errorf("%s not implemented", ldap.FilterMap[uint64(f.Tag)]), ResultCode: ldap.LDAPResultFilterError}
 
-		return false, ldap.LDAPResultOperationsError
-
-	case "FilterApproxMatch": // TODO
-		log.Println("FilterApproxMatch not implemented")
-
-		return false, ldap.LDAPResultOperationsError
-
-	case "FilterExtensibleMatch": // TODO
-		log.Println("FilterExtensibleMatch not implemented")
-
-		return false, ldap.LDAPResultOperationsError
+	case ldap.FilterExtensibleMatch: // TODO
+		return false, &ldap.Error{Err: fmt.Errorf("%s not implemented", ldap.FilterMap[uint64(f.Tag)]), ResultCode: ldap.LDAPResultFilterError}
 	}
 
-	return false, ldap.LDAPResultSuccess
+	return false, nil
 }
 
 func GetFilterAttribute(filter string, attr string) (string, error) {

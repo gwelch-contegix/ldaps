@@ -124,7 +124,6 @@ func TestModifyDN(t *testing.T) {
 	}()
 	go func() {
 		cmd := exec.Command("ldapadd", "-v", "-H", ldapURL, "-x", "-f", "tests/add.ldif")
-		//ldapmodrdn -H ldap://localhost:3389 -x "uid=babs,dc=example,dc=com" "uid=babsy,dc=example,dc=com"
 		out, _ := cmd.CombinedOutput()
 		if !strings.Contains(string(out), "modify complete") {
 			t.Errorf("ldapadd failed: %v", string(out))

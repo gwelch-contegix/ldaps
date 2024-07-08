@@ -38,7 +38,7 @@ type selfSignedCert struct {
 
 // mustListen returns a net.Listener listening on a random port.
 func mustListen() (ln net.Listener, actualAddr string) {
-	ln, err := net.Listen("tcp", "localhost:0")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		panic(err)
 	}
@@ -175,6 +175,7 @@ func (c *selfSignedCert) ClientTLSConfig() *tls.Config {
 	if !pool.AppendCertsFromPEM(cert) {
 		panic("failed to append certificate")
 	}
+
 	return &tls.Config{
 		RootCAs: pool,
 	}
@@ -185,6 +186,7 @@ func (c *selfSignedCert) ServerTLSConfig() *tls.Config {
 	if err != nil {
 		panic(err)
 	}
+
 	return &tls.Config{
 		ServerName:   "localhost",
 		Certificates: []tls.Certificate{cert},
@@ -488,6 +490,7 @@ func (b bindAnonOK) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.Simp
 	if bindDN == "" && bindSimplePw == "" {
 		return nil, nil
 	}
+
 	return nil, ldap.NewError(ldap.LDAPResultInvalidCredentials, errors.New(""))
 }
 
@@ -529,7 +532,7 @@ func (b bindCaseInsensitive) Bind(bindDN, bindSimplePw string, conn net.Conn) (*
 
 type searchSimple struct{}
 
-func (s searchSimple) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
+func (s searchSimple) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
 	entries := []*ldap.Entry{
 		ldap.NewEntry("cn=ned,o=testers,c=test", map[string][]string{
 			"cn":            {"ned"},
@@ -559,12 +562,13 @@ func (s searchSimple) Search(boundDN string, searchReq ldap.SearchRequest, conn 
 		}),
 	}
 
-	return ServerSearchResult{entries, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
+	return &ldap.SearchResult{
+		Entries: entries, Referrals: []string{}, Controls: []ldap.Control{}}, nil
 }
 
 type searchSimple2 struct{}
 
-func (s searchSimple2) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
+func (s searchSimple2) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
 	entries := []*ldap.Entry{
 		ldap.NewEntry("cn=hamburger,o=testers,c=testz", map[string][]string{
 			"cn":            {"hamburger"},
@@ -576,18 +580,20 @@ func (s searchSimple2) Search(boundDN string, searchReq ldap.SearchRequest, conn
 		}),
 	}
 
-	return ServerSearchResult{entries, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
+	return &ldap.SearchResult{
+		Entries: entries, Referrals: []string{}, Controls: []ldap.Control{}}, nil
 }
 
 type searchPanic struct{}
 
-func (s searchPanic) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
+func (s searchPanic) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
 	panic("this is a test panic")
 }
 
 type searchControls struct{}
 
-func (s searchControls) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
+func (s searchControls) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
+	var entries []*ldap.Entry
 	if len(searchReq.Controls) == 1 && searchReq.Controls[0].GetControlType() == "1.2.3.4.5" {
 		newEntry := ldap.NewEntry("cn=hamburger,o=testers,c=testz", map[string][]string{
 			"cn":            {"hamburger"},
@@ -598,15 +604,15 @@ func (s searchControls) Search(boundDN string, searchReq ldap.SearchRequest, con
 			"objectclass":   {"posixaccount"},
 		})
 
-		return ServerSearchResult{[]*ldap.Entry{newEntry}, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
+		entries = append(entries, newEntry)
 	}
 
-	return ServerSearchResult{[]*ldap.Entry{}, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
+	return &ldap.SearchResult{Entries: entries, Referrals: []string{}, Controls: []ldap.Control{}}, nil
 }
 
 type searchCaseInsensitive struct{}
 
-func (s searchCaseInsensitive) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
+func (s searchCaseInsensitive) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
 	entries := []*ldap.Entry{
 		ldap.NewEntry("cn=CASE,o=testers,c=test", map[string][]string{
 			"cn":            {"CaSe"},
@@ -619,7 +625,7 @@ func (s searchCaseInsensitive) Search(boundDN string, searchReq ldap.SearchReque
 		}),
 	}
 
-	return ServerSearchResult{entries, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
+	return &ldap.SearchResult{Entries: entries, Referrals: []string{}, Controls: []ldap.Control{}}, nil
 }
 
 func TestRouteFunc(t *testing.T) {

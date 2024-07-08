@@ -3,7 +3,6 @@ package ldaps
 import (
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"runtime/debug"
 	"strings"
@@ -15,21 +14,18 @@ import (
 func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID uint64, boundDN string, server *Server, conn net.Conn) (resultErr error) {
 	defer func() {
 		if r := recover(); r != nil {
-			// log.Printf("Recovered from panic in SearchFn: %s\n%s", r, string(debug.Stack()))
 			resultErr = fmt.Errorf("Search function panic: %s at %s", r, string(debug.Stack()))
 		}
 	}()
 
 	searchReq, err := parseSearchRequest(req, controls)
 	if err != nil {
-		log.Printf("Error parsing search request: %v", req.Children[1].Value)
 		return err
 	}
 
 	filterPacket, err := ldap.CompileFilter(searchReq.Filter)
 	if err != nil {
-		log.Printf("Error compiling filter: %v", searchReq.Filter)
-		return ldap.NewError(ldap.LDAPResultFilterError, err)
+		return ldap.NewError(ldap.LDAPResultFilterError, fmt.Errorf("Failed to compile filter: %q %w", searchReq.Filter, err))
 	}
 
 	fnNames := []string{}
@@ -39,8 +35,10 @@ func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID ui
 	fn := routeFunc(searchReq.BaseDN, fnNames)
 	searchResp, err := server.SearchFns[fn].Search(boundDN, searchReq, conn)
 	if err != nil {
-		log.Printf("SearchFn Error %s", err.Error())
-		return ldap.NewError(searchResp.ResultCode, err)
+		return err
+	}
+	if searchResp == nil {
+		searchResp = &ldap.SearchResult{}
 	}
 
 	if server.EnforceLDAP {
@@ -59,12 +57,11 @@ func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID ui
 	for _, entry := range searchResp.Entries {
 		if server.EnforceLDAP {
 			// filter
-			keep, resultCode := ApplyFilter(filterPacket, entry)
-			if resultCode != ldap.LDAPResultSuccess {
-				log.Printf("Error Applying filter: %v", searchReq.Filter)
-				return ldap.NewError(resultCode, errors.New("ApplyFilter error"))
+			matched, err := ApplyFilter(filterPacket, entry)
+			if err != nil {
+				return err
 			}
-			if !keep {
+			if !matched {
 				continue
 			}
 
@@ -99,7 +96,7 @@ func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID ui
 		// respond
 		responsePacket := encodeSearchResponse(messageID, entry)
 		if err = sendPacket(conn, responsePacket); err != nil {
-			log.Printf("Error encoding response: %v", searchReq.Filter)
+			// log.Printf("Error encoding response: %v", searchReq.Filter)
 			return ldap.NewError(ldap.LDAPResultOperationsError, err)
 		}
 	}
@@ -109,7 +106,7 @@ func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID ui
 
 func parseSearchRequest(req *ber.Packet, controls *[]ldap.Control) (ldap.SearchRequest, error) {
 	if len(req.Children) != 8 {
-		return ldap.SearchRequest{}, ldap.NewError(ldap.LDAPResultOperationsError, errors.New("Bad search request: invalid length"))
+		return ldap.SearchRequest{}, ldap.NewError(ldap.LDAPResultProtocolError, errors.New("Bad search request: invalid length"))
 	}
 
 	// Parse the request
