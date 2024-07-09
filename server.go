@@ -342,7 +342,7 @@ handler:
 			server.stats.countBinds(1)
 			var resultCode uint16 = ldap.LDAPResultSuccess
 			message := ""
-			_, err := HandleBindRequest(req, server.BindFns, conn) // TODO: Handle SimpleBindResult
+			dn, _, err := HandleBindRequest(req, server.BindFns, conn) // TODO: Handle SimpleBindResult
 			if err != nil {
 				e := &ldap.Error{}
 				if !errors.As(err, &e) {
@@ -353,7 +353,9 @@ handler:
 				resultCode = e.ResultCode
 				message = e.Err.Error()
 			}
-			if resultCode != ldap.LDAPResultSuccess {
+			if resultCode == ldap.LDAPResultSuccess {
+				boundDN = dn
+			} else {
 				log.Printf("Error Binding: %s", err)
 			}
 
