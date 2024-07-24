@@ -53,9 +53,25 @@ func TestApplyFilter(t *testing.T) {
 			Filter: "(memberOf=cn=*sers,ou=groups,dc=example,dc=org)",
 			Entry: ldap.NewEntry("cn=test,ou=users,dc=example,dc=org", map[string][]string{
 				"objectclass": {"User"},
-				"memberOf":    {"cn=users,ou=groups,dc=example,dc=org"},
+				"memberOf":    {"cn=users,ou=groups,dc=example,dc=org","cn=admin-users,ou=groups,dc=example,dc=org"},
 			}),
 			Expected: true,
+		},
+		{
+			Filter: "(memberOf=cn=admin-*,ou=groups,dc=example,dc=org)",
+			Entry: ldap.NewEntry("cn=test,ou=users,dc=example,dc=org", map[string][]string{
+				"objectclass": {"User"},
+				"memberOf":    {"cn=users,ou=groups,dc=example,dc=org","cn=admin-users,ou=groups,dc=example,dc=org"},
+			}),
+			Expected: true,
+		},
+		{
+			Filter: "(memberOf=cn=admin*user,ou=groups,dc=example,dc=org)",
+			Entry: ldap.NewEntry("cn=test,ou=users,dc=example,dc=org", map[string][]string{
+				"objectclass": {"User"},
+				"memberOf":    {"cn=users,ou=groups,dc=example,dc=org","cn=admin-users,ou=groups,dc=example,dc=org"},
+			}),
+			Expected: false,
 		},
 		{
 			Filter: "(memberOf=cn=*sers,ou=groups,dc=example,dc=org)",
@@ -71,12 +87,16 @@ func TestApplyFilter(t *testing.T) {
 			t.Errorf("Compiling the filter failed: %v", err)
 		}
 		matched, ldapResult := ApplyFilter(berFilter, testInfo.Entry)
+		var resultCode uint16 = 0
+		if ldapResult != nil {
+			resultCode = ldapResult.ResultCode
+		}
 		if matched != testInfo.Expected {
 			status := "did not match"
 			if matched {
 				status = "matched"
 			}
-			t.Errorf("Entry: %v %s: %q return code: %s", testInfo.Entry, status, testInfo.Filter, ldap.LDAPResultCodeMap[ldapResult.ResultCode])
+			t.Errorf("Entry: %v %s: %q return code: %v", testInfo.Entry, status, testInfo.Filter, ldap.LDAPResultCodeMap[resultCode])
 		}
 	}
 }
