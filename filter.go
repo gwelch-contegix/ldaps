@@ -38,12 +38,14 @@ func ApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, *ldap.Error) {
 				}
 			}
 		}
+
 	case ldap.FilterPresent:
 		for _, a := range entry.Attributes {
 			if strings.EqualFold(a.Name, f.Data.String()) {
 				return true, nil
 			}
 		}
+
 	case ldap.FilterAnd:
 		for _, child := range f.Children {
 			ok, exitCode := ApplyFilter(child, entry)
@@ -80,6 +82,7 @@ func ApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, *ldap.Error) {
 		} else if !ok {
 			return true, nil
 		}
+
 	case ldap.FilterSubstrings:
 		if len(f.Children) != 2 {
 			return false, &ldap.Error{Err: errors.New("invalid filter"), ResultCode: ldap.LDAPResultFilterError}
@@ -105,7 +108,7 @@ func ApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, *ldap.Error) {
 			value := strings.ToLower(v)
 			matched := false
 
-			for _, s := range f.Children[1].Children { // Check each part of the filter. This can't end early because if we are checking group membership the group may not be the first listed group
+			for _, s := range f.Children[1].Children { // Check each part of the filter ('beg' and 'end' in 'beg*end'). This can't end early because if we are checking group membership the group may not be the first listed group
 				search := strings.ToLower(s.Data.String())
 
 				switch s.Tag {
@@ -115,7 +118,8 @@ func ApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, *ldap.Error) {
 					matched = strings.Contains(value, search)
 				case ldap.FilterSubstringsFinal:
 					matched = strings.HasSuffix(value, search)
-				default:
+				}
+				if !matched {
 					matched = false
 					continue matchFail // This section of the filter failed (eg 'beg' in 'beg*end' doesn't match the value) that means we need to skip the current value we are checking
 				}
