@@ -310,7 +310,7 @@ handler:
 		case ldap.ApplicationExtendedRequest:
 			var tlsConn *tls.Conn
 			if n := len(req.Children); n == 1 || n == 2 {
-				if name := ber.DecodeString(req.Children[0].Data.Bytes()); name == oidStartTLS {
+				if name := ber.DecodeString(req.Children[0].Data.Bytes()); name == oidStartTLS && server.TLSConfig != nil {
 					tlsConn = tls.Server(conn, server.TLSConfig)
 				}
 			}
