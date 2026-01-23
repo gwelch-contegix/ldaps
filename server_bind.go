@@ -1,6 +1,7 @@
 package ldaps
 
 import (
+	"context"
 	"errors"
 	"net"
 	"runtime/debug"
@@ -11,7 +12,7 @@ import (
 	"github.com/go-ldap/ldap/v3"
 )
 
-func HandleBindRequest(req *ber.Packet, fns map[string]Binder, conn net.Conn) (boundDN string, res *ldap.SimpleBindResult, resultErr error) {
+func HandleBindRequest(ctx context.Context, req *ber.Packet, fns map[string]Binder, conn net.Conn) (boundDN string, res *ldap.SimpleBindResult, resultErr error) {
 	defer func() {
 		if r := recover(); r != nil {
 			resultErr = fmt.Errorf("Bind function panic: %s at %s", r, string(debug.Stack()))
@@ -49,7 +50,7 @@ func HandleBindRequest(req *ber.Packet, fns map[string]Binder, conn net.Conn) (b
 
 		fn := routeFunc(bindDN, fnNames)
 
-		ret, err := fns[fn].Bind(bindDN, bindAuth.Data.String(), conn)
+		ret, err := fns[fn].Bind(ctx, bindDN, bindAuth.Data.String(), conn)
 
 		return bindDN, ret, err
 

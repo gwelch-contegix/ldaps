@@ -1,6 +1,7 @@
 package ldaps
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -11,7 +12,7 @@ import (
 	"github.com/go-ldap/ldap/v3"
 )
 
-func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID uint64, boundDN string, server *Server, conn net.Conn) (resultErr error) {
+func HandleSearchRequest(ctx context.Context, req *ber.Packet, controls *[]ldap.Control, messageID uint64, boundDN string, server *Server, conn net.Conn) (resultErr error) {
 	defer func() {
 		if r := recover(); r != nil {
 			resultErr = fmt.Errorf("Search function panic: %s at %s", r, string(debug.Stack()))
@@ -33,7 +34,7 @@ func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID ui
 		fnNames = append(fnNames, k)
 	}
 	fn := routeFunc(searchReq.BaseDN, fnNames)
-	searchResp, err := server.SearchFns[fn].Search(boundDN, searchReq, conn)
+	searchResp, err := server.SearchFns[fn].Search(ctx, boundDN, searchReq, conn)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package ldaps
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -23,31 +24,31 @@ const (
 )
 
 type Binder interface {
-	Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error)
+	Bind(ctx context.Context, bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error)
 }
 type Searcher interface {
-	Search(boundDN string, req ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error)
+	Search(ctx context.Context, boundDN string, req ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error)
 }
 type Modifier interface {
-	Modify(boundDN string, req ldap.ModifyRequest, conn net.Conn) (*ldap.ModifyResult, error)
+	Modify(ctx context.Context, boundDN string, req ldap.ModifyRequest, conn net.Conn) (*ldap.ModifyResult, error)
 }
 type Adder interface {
-	Add(boundDN string, req ldap.AddRequest, conn net.Conn) error
+	Add(ctx context.Context, boundDN string, req ldap.AddRequest, conn net.Conn) error
 }
 type ModifyDNr interface {
-	ModifyDN(boundDN string, req ldap.ModifyDNRequest, conn net.Conn) error
+	ModifyDN(ctx context.Context, boundDN string, req ldap.ModifyDNRequest, conn net.Conn) error
 }
 type Deleter interface {
-	Delete(boundDN, deleteDN string, conn net.Conn) error
+	Delete(ctx context.Context, boundDN, deleteDN string, conn net.Conn) error
 }
 type Comparer interface {
-	Compare(boundDN string, req ldap.CompareRequest, conn net.Conn) error
+	Compare(ctx context.Context, boundDN string, req ldap.CompareRequest, conn net.Conn) error
 }
 type Abandoner interface {
-	Abandon(boundDN string, conn net.Conn) error
+	Abandon(ctx context.Context, boundDN string, conn net.Conn) error
 }
 type Closer interface {
-	Close(boundDN string, conn net.Conn)
+	Close(ctx context.Context, boundDN string, conn net.Conn)
 }
 
 type Server struct {
@@ -244,8 +245,23 @@ func (server *Server) Close() {
 }
 
 func (server *Server) handleConnection(conn net.Conn) {
+	var cancel context.CancelFunc
+	ctx := context.Background()
+	ctx, cancel = context.WithCancel(ctx)
 	boundDN := "" // "" == anonymous
+	defer func() {
+		cancel()
+		panicErr := recover()
+		if panicErr != nil {
+			log.Printf("Unhandled Panic: %v", panicErr)
+		}
+		for _, c := range server.CloseFns {
+			c.Close(ctx, boundDN, conn)
+		}
 
+		conn.Close()
+
+	}()
 handler:
 	for {
 		// read incoming LDAP packet
@@ -335,7 +351,7 @@ handler:
 				conn = tlsConn
 			}
 		case ldap.ApplicationAbandonRequest:
-			err = HandleAbandonRequest(req, boundDN, server.AbandonFns, conn)
+			err = HandleAbandonRequest(ctx, req, boundDN, server.AbandonFns, conn)
 			if err != nil {
 				log.Printf("Error Abandoning Request: %s", err)
 
@@ -346,7 +362,7 @@ handler:
 			server.stats.countBinds(1)
 			var resultCode uint16 = ldap.LDAPResultSuccess
 			message := ""
-			dn, _, err := HandleBindRequest(req, server.BindFns, conn) // TODO: Handle SimpleBindResult
+			dn, _, err := HandleBindRequest(ctx, req, server.BindFns, conn) // TODO: Handle SimpleBindResult
 			if err != nil {
 				e := &ldap.Error{}
 				if !errors.As(err, &e) {
@@ -372,7 +388,7 @@ handler:
 			server.stats.countSearches(1)
 			var resultCode uint16 = ldap.LDAPResultSuccess
 			message := ""
-			err = HandleSearchRequest(req, &controls, messageID, boundDN, server, conn)
+			err = HandleSearchRequest(ctx, req, &controls, messageID, boundDN, server, conn)
 			if err != nil {
 				e := &ldap.Error{}
 				if !errors.As(err, &e) {
@@ -396,7 +412,7 @@ handler:
 		case ldap.ApplicationAddRequest:
 			var resultCode uint16 = ldap.LDAPResultSuccess
 			message := ""
-			err = HandleAddRequest(req, boundDN, server.AddFns, conn)
+			err = HandleAddRequest(ctx, req, boundDN, server.AddFns, conn)
 			if err != nil {
 				e := &ldap.Error{}
 				if !errors.As(err, &e) {
@@ -421,7 +437,7 @@ handler:
 		case ldap.ApplicationModifyRequest:
 			var resultCode uint16 = ldap.LDAPResultSuccess
 			message := ""
-			_, err = HandleModifyRequest(req, boundDN, server.ModifyFns, conn) // TODO: Handle ModifyResult
+			_, err = HandleModifyRequest(ctx, req, boundDN, server.ModifyFns, conn) // TODO: Handle ModifyResult
 			if err != nil {
 				e := &ldap.Error{}
 				if !errors.As(err, &e) {
@@ -444,7 +460,7 @@ handler:
 		case ldap.ApplicationDelRequest:
 			var resultCode uint16 = ldap.LDAPResultSuccess
 			message := ""
-			err = HandleDeleteRequest(req, boundDN, server.DeleteFns, conn)
+			err = HandleDeleteRequest(ctx, req, boundDN, server.DeleteFns, conn)
 			if err != nil {
 				e := &ldap.Error{}
 				if !errors.As(err, &e) {
@@ -467,7 +483,7 @@ handler:
 		case ldap.ApplicationModifyDNRequest:
 			var resultCode uint16 = ldap.LDAPResultSuccess
 			message := ""
-			err = HandleModifyDNRequest(req, boundDN, server.ModifyDNFns, conn)
+			err = HandleModifyDNRequest(ctx, req, boundDN, server.ModifyDNFns, conn)
 			if err != nil {
 				e := &ldap.Error{}
 				if !errors.As(err, &e) {
@@ -490,7 +506,7 @@ handler:
 		case ldap.ApplicationCompareRequest:
 			var resultCode uint16 = ldap.LDAPResultSuccess
 			message := ""
-			err = HandleCompareRequest(req, boundDN, server.CompareFns, conn)
+			err = HandleCompareRequest(ctx, req, boundDN, server.CompareFns, conn)
 			if err != nil {
 				log.Printf("Error Comparing: %s", err)
 				e := &ldap.Error{}
@@ -510,12 +526,6 @@ handler:
 			}
 		}
 	}
-
-	for _, c := range server.CloseFns {
-		c.Close(boundDN, conn)
-	}
-
-	conn.Close()
 }
 
 func sendPacket(conn net.Conn, packet *ber.Packet) error {
@@ -568,39 +578,39 @@ func encodeLDAPResponse(messageID uint64, responseType ber.Tag, LDAPResultCode u
 
 type defaultHandler struct{}
 
-func (h defaultHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
+func (h defaultHandler) Bind(ctx context.Context, bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	return nil, ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
-func (h defaultHandler) Search(boundDN string, req ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
+func (h defaultHandler) Search(ctx context.Context, boundDN string, req ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
 	return nil, ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
-func (h defaultHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.Conn) (*ldap.ModifyResult, error) {
+func (h defaultHandler) Modify(ctx context.Context, boundDN string, req ldap.ModifyRequest, conn net.Conn) (*ldap.ModifyResult, error) {
 	return nil, ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
-func (h defaultHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) error {
+func (h defaultHandler) Add(ctx context.Context, boundDN string, req ldap.AddRequest, conn net.Conn) error {
 	return ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
-func (h defaultHandler) Delete(boundDN, deleteDN string, conn net.Conn) error {
+func (h defaultHandler) Delete(ctx context.Context, boundDN, deleteDN string, conn net.Conn) error {
 	return ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
-func (h defaultHandler) ModifyDN(boundDN string, req ldap.ModifyDNRequest, conn net.Conn) error {
+func (h defaultHandler) ModifyDN(ctx context.Context, boundDN string, req ldap.ModifyDNRequest, conn net.Conn) error {
 	return ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
-func (h defaultHandler) Compare(boundDN string, req ldap.CompareRequest, conn net.Conn) error {
+func (h defaultHandler) Compare(ctx context.Context, boundDN string, req ldap.CompareRequest, conn net.Conn) error {
 	return ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
-func (h defaultHandler) Abandon(boundDN string, conn net.Conn) error {
+func (h defaultHandler) Abandon(ctx context.Context, boundDN string, conn net.Conn) error {
 	return ldap.NewError(ldap.LDAPResultUnavailable, errors.New("Not Implemented"))
 }
 
-func (h defaultHandler) Close(boundDN string, conn net.Conn) {} // conn will be closed automatically
+func (h defaultHandler) Close(ctx context.Context, boundDN string, conn net.Conn) {} // conn will be closed automatically
 
 func (stats *stats) countConns(delta int) {
 	if stats != nil {
