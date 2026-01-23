@@ -9,6 +9,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
 	"github.com/go-ldap/ldap/v3"
@@ -220,6 +221,9 @@ listener:
 	for {
 		select {
 		case c := <-newConn:
+			// One minute should be plenty of a deadline
+			// handlers can alwasy extend the deadline
+			c.SetDeadline(time.Now().Add(time.Minute))
 			server.stats.countConns(1)
 			go server.handleConnection(c)
 		case <-server.Quit:
