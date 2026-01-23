@@ -1,6 +1,7 @@
 package ldaps
 
 import (
+	"log"
 	"os/exec"
 	"strings"
 	"testing"
@@ -182,6 +183,9 @@ func TestBindSearchMulti(t *testing.T) {
 }
 
 func TestSearchPanic(t *testing.T) {
+	previousOutput := log.Writer()
+	log.SetOutput(t.Output())
+	defer log.SetOutput(previousOutput)
 	done := make(chan bool)
 	s := NewServer()
 	s.SearchFunc("", searchPanic{})
@@ -259,7 +263,7 @@ func TestSearchFiltering(t *testing.T) {
 		t.Log(i.name)
 
 		go func() {
-			cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x",
+			cmd := exec.Command("ldapsearch", "-d", "99", "-H", ldapURL, "-x",
 				"-b", serverBaseDN, "-D", "cn=testy,"+serverBaseDN, "-w", "iLike2test", i.filterStr)
 			out, _ := cmd.CombinedOutput()
 			if !strings.Contains(string(out), "numResponses: "+i.numResponses) {

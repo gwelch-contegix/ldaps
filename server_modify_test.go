@@ -22,30 +22,29 @@ func TestAdd(t *testing.T) {
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
-	}()
-	// time.Sleep(time.Minute *4)
-	go func() {
-		cmd := exec.Command("ldapadd", "-v", "-H", ldapURL, "-x", "-f", "tests/add.ldif")
-		out, _ := cmd.CombinedOutput()
-		if !strings.Contains(string(out), "modify complete") {
-			t.Errorf("ldapadd failed: %v", string(out))
-		}
-		cmd = exec.Command("ldapadd", "-v", "-H", ldapURL, "-x", "-f", "tests/add2.ldif")
-		out, _ = cmd.CombinedOutput()
-		if !strings.Contains(string(out), "ldap_add: Insufficient access") {
-			t.Errorf("ldapadd should have failed: %v", string(out))
-		}
-		if strings.Contains(string(out), "modify complete") {
-			t.Errorf("ldapadd should have failed: %v", string(out))
-		}
 		done <- true
 	}()
-	select {
-	case <-done:
-	case <-time.After(timeout):
-		t.Errorf("ldapadd command timed out")
+
+	cmdCtx, cancel := context.WithTimeout(context.Background(), timeout*3)
+	cmd := exec.CommandContext(cmdCtx, "ldapadd", "-v", "-H", ldapURL, "-x", "-f", "tests/add.ldif")
+
+	out, err := cmd.CombinedOutput()
+	cancel() // releases resources
+	if !strings.Contains(string(out), "modify complete") {
+		t.Errorf("ldapadd failed: error(%v) %v", err, string(out))
+	}
+	cmdCtx, cancel = context.WithTimeout(context.Background(), timeout*3)
+	cmd = exec.CommandContext(cmdCtx, "ldapadd", "-v", "-H", ldapURL, "-x", "-f", "tests/add2.ldif")
+	out, _ = cmd.CombinedOutput()
+	cancel() // releases resources
+	if !strings.Contains(string(out), "ldap_add: Insufficient access") {
+		t.Errorf("ldapadd should have failed: %v", string(out))
+	}
+	if strings.Contains(string(out), "modify complete") {
+		t.Errorf("ldapadd should have failed: %v", string(out))
 	}
 	s.Close()
+	<-done
 }
 
 func TestDelete(t *testing.T) {
