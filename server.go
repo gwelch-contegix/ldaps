@@ -14,6 +14,7 @@ import (
 
 	ber "github.com/go-asn1-ber/asn1-ber"
 	"github.com/go-ldap/ldap/v3"
+	nanoid "github.com/matoous/go-nanoid/v2"
 )
 
 // Other LDAP constants.
@@ -244,9 +245,13 @@ func (server *Server) Close() {
 	<-server.Quit
 }
 
+type ConnectionID struct{}
+
 func (server *Server) handleConnection(conn net.Conn) {
 	var cancel context.CancelFunc
 	ctx := context.Background()
+	sid := nanoid.Must()
+	ctx = context.WithValue(ctx, ConnectionID{}, sid)
 	ctx, cancel = context.WithCancel(ctx)
 	boundDN := "" // "" == anonymous
 	defer func() {
@@ -381,7 +386,7 @@ handler:
 
 			if err = sendPacket(conn, encodeLDAPResponse(messageID, ldap.ApplicationBindResponse, resultCode, message)); err != nil {
 				log.Printf("sendPacket error: %s", err.Error())
-
+				boundDN = ""
 				break handler
 			}
 		case ldap.ApplicationSearchRequest:
