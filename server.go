@@ -274,28 +274,28 @@ handler:
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) { // Client closed connection
 			break
 		} else if err != nil {
-			log.Printf("handleConnection ber.ReadPacket ERROR: %s", err.Error())
+			log.Printf("%v: handleConnection ber.ReadPacket ERROR: %s", sid, err.Error())
 
 			break
 		}
 
 		// sanity check this packet
 		if len(packet.Children) < 2 {
-			log.Print("len(packet.Children) < 2")
+			log.Printf("%v: len(packet.Children) < 2", sid)
 
 			break
 		}
 		// check the message ID and ClassType
 		messageID64, ok := packet.Children[0].Value.(int64)
 		if !ok {
-			log.Printf("malformed messageID: %T: %#v", packet.Children[0].Value, packet.Children[0].Value)
+			log.Printf("%v: malformed messageID: %T: %#v", sid, packet.Children[0].Value, packet.Children[0].Value)
 
 			break
 		}
 		messageID := uint64(messageID64)
 		req := packet.Children[1]
 		if req.ClassType != ber.ClassApplication {
-			log.Print("req.ClassType != ber.ClassApplication")
+			log.Printf("%v: req.ClassType != ber.ClassApplication: %v != %v", sid, req.ClassType, ber.ClassApplication)
 
 			break
 		}
@@ -306,7 +306,7 @@ handler:
 				var control ldap.Control
 				control, err = ldap.DecodeControl(child)
 				if err != nil {
-					log.Print("Failed to decode control")
+					log.Printf("%v: Failed to decode control", sid)
 				} else {
 					controls = append(controls, control)
 				}
@@ -320,10 +320,10 @@ handler:
 			if !ok {
 				name = "Unknown"
 			}
-			log.Printf("Unhandled operation: %s [%d]", name, req.Tag)
+			log.Printf("%v: Unhandled operation: %s [%d]", sid, name, req.Tag)
 			responsePacket := encodeLDAPResponse(messageID, ldap.ApplicationUnbindRequest, ldap.LDAPResultUnavailable, fmt.Sprintf("Unhandled operation: %s [%d]", name, req.Tag))
 			if err = sendPacket(conn, responsePacket); err != nil {
-				log.Printf("sendPacket error %s", err.Error())
+				log.Printf("%v: sendPacket error %s", sid, err.Error())
 			}
 
 			break handler
@@ -348,7 +348,7 @@ handler:
 
 			responsePacket := encodeLDAPResponse(messageID, ldap.ApplicationExtendedResponse, ldapResultCode, ldap.LDAPResultCodeMap[ldapResultCode])
 			if err = sendPacket(conn, responsePacket); err != nil {
-				log.Printf("sendPacket error %s", err.Error())
+				log.Printf("%v: sendPacket error %s", sid, err.Error())
 
 				break handler
 			}
@@ -358,7 +358,7 @@ handler:
 		case ldap.ApplicationAbandonRequest:
 			err = HandleAbandonRequest(ctx, req, boundDN, server.AbandonFns, conn)
 			if err != nil {
-				log.Printf("Error Abandoning Request: %s", err)
+				log.Printf("%v: Error Abandoning Request: %s", sid, err)
 
 				break handler
 			}
@@ -381,11 +381,11 @@ handler:
 			if resultCode == ldap.LDAPResultSuccess {
 				boundDN = dn
 			} else {
-				log.Printf("Error Binding: %s", err)
+				log.Printf("E%v: rror Binding: %s", sid, err)
 			}
 
 			if err = sendPacket(conn, encodeLDAPResponse(messageID, ldap.ApplicationBindResponse, resultCode, message)); err != nil {
-				log.Printf("sendPacket error: %s", err.Error())
+				log.Printf("s%v: endPacket error: %s", sid, err.Error())
 				boundDN = ""
 				break handler
 			}
@@ -405,11 +405,11 @@ handler:
 				message = e.Err.Error()
 			}
 			if resultCode != ldap.LDAPResultSuccess {
-				log.Printf("Error Searching: %s", err)
+				log.Printf("E%v: rror Searching: %s", sid, err)
 			}
 
 			if err = sendPacket(conn, encodeLDAPResponse(messageID, ldap.ApplicationSearchResultDone, resultCode, message)); err != nil {
-				log.Printf("sendPacket error: %s", err.Error())
+				log.Printf("s%v: endPacket error: %s", sid, err.Error())
 
 				break handler
 			}
@@ -429,13 +429,13 @@ handler:
 				if e.Err != nil {
 					message = e.Err.Error()
 					if resultCode != ldap.LDAPResultSuccess {
-						log.Printf("Error Adding: %s", err)
+						log.Printf("%v: Error Adding: %s", sid, err)
 					}
 				}
 			}
 
 			if err = sendPacket(conn, encodeLDAPResponse(messageID, ldap.ApplicationAddResponse, resultCode, message)); err != nil {
-				log.Printf("sendPacket error: %s", err.Error())
+				log.Printf("%v: sendPacket error: %s", sid, err.Error())
 
 				break handler
 			}
@@ -454,11 +454,11 @@ handler:
 				message = e.Err.Error()
 			}
 			if resultCode != ldap.LDAPResultSuccess {
-				log.Printf("Error Modifying: %s", err)
+				log.Printf("%v: Error Modifying: %s", sid, err)
 			}
 
 			if err = sendPacket(conn, encodeLDAPResponse(messageID, ldap.ApplicationModifyResponse, resultCode, message)); err != nil {
-				log.Printf("sendPacket error: %s", err.Error())
+				log.Printf("%v: sendPacket error: %s", sid, err.Error())
 
 				break handler
 			}
@@ -477,11 +477,11 @@ handler:
 				message = e.Err.Error()
 			}
 			if resultCode != ldap.LDAPResultSuccess {
-				log.Printf("Error Deleting: %s", err)
+				log.Printf("%v: Error Deleting: %s", sid, err)
 			}
 
 			if err = sendPacket(conn, encodeLDAPResponse(messageID, ldap.ApplicationDelResponse, resultCode, message)); err != nil {
-				log.Printf("sendPacket error: %s", err.Error())
+				log.Printf("%v: sendPacket error: %s", sid, err.Error())
 
 				break handler
 			}
@@ -500,11 +500,11 @@ handler:
 				message = e.Err.Error()
 			}
 			if !(resultCode == ldap.LDAPResultSuccess || resultCode == ldap.LDAPResultCompareFalse || resultCode == ldap.LDAPResultCompareTrue) {
-				log.Printf("Error Modifying DN: %s", err)
+				log.Printf("%v: Error Modifying DN: %s", sid, err)
 			}
 
 			if err = sendPacket(conn, encodeLDAPResponse(messageID, ldap.ApplicationModifyDNResponse, resultCode, message)); err != nil {
-				log.Printf("sendPacket error: %s", err.Error())
+				log.Printf("%v: sendPacket error: %s", sid, err.Error())
 
 				break handler
 			}
@@ -513,7 +513,7 @@ handler:
 			message := ""
 			err = HandleCompareRequest(ctx, req, boundDN, server.CompareFns, conn)
 			if err != nil {
-				log.Printf("Error Comparing: %s", err)
+				log.Printf("%v: Error Comparing: %s", sid, err)
 				e := &ldap.Error{}
 				if !errors.As(err, &e) {
 					e = &ldap.Error{ResultCode: ldap.LDAPResultOperationsError, Err: errors.New("Internal Error")}
@@ -525,7 +525,7 @@ handler:
 			}
 
 			if err = sendPacket(conn, encodeLDAPResponse(messageID, ldap.ApplicationCompareResponse, resultCode, message)); err != nil {
-				log.Printf("sendPacket error: %s", err.Error())
+				log.Printf("%v: sendPacket error: %s", sid, err.Error())
 
 				break handler
 			}
