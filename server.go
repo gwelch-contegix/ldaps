@@ -381,11 +381,11 @@ handler:
 			if resultCode == ldap.LDAPResultSuccess {
 				boundDN = dn
 			} else {
-				log.Printf("E%v: rror Binding: %s", sid, err)
+				log.Printf("%v: Error Binding: %s", sid, err)
 			}
 
 			if err = sendPacket(conn, encodeLDAPResponse(messageID, ldap.ApplicationBindResponse, resultCode, message)); err != nil {
-				log.Printf("s%v: endPacket error: %s", sid, err.Error())
+				log.Printf("%v: sendPacket error: %s", sid, err.Error())
 				boundDN = ""
 				break handler
 			}
@@ -405,11 +405,11 @@ handler:
 				message = e.Err.Error()
 			}
 			if resultCode != ldap.LDAPResultSuccess {
-				log.Printf("E%v: rror Searching: %s", sid, err)
+				log.Printf("%v: Error Searching: %s", sid, err)
 			}
 
 			if err = sendPacket(conn, encodeLDAPResponse(messageID, ldap.ApplicationSearchResultDone, resultCode, message)); err != nil {
-				log.Printf("s%v: endPacket error: %s", sid, err.Error())
+				log.Printf("%v: sendPacket error: %s", sid, err.Error())
 
 				break handler
 			}
